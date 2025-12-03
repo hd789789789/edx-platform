@@ -163,10 +163,13 @@ class LeaderboardTabView(RetrieveAPIView):
             serializer = self.get_serializer_class()(data)
             return Response(serializer.data)
 
-        # Get all user data in one query for efficiency
-        user_ids = [grade.user_id for grade in course_grades]
-        users = User.objects.filter(id__in=user_ids).select_related('profile')
-        users_dict = {user.id: user for user in users}
+        # Get all enrolled users (not just those with grades)
+        enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
+        all_users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+        users_dict = {user.id: user for user in all_users}
+
+        # Create a dict of grades by user_id for quick lookup
+        grades_dict = {grade.user_id: grade for grade in course_grades}
 
         # Build leaderboard data
         leaderboard_data = []
@@ -174,6 +177,7 @@ class LeaderboardTabView(RetrieveAPIView):
         rank = 1
         previous_grade = None
 
+        # First, add users with grades (sorted by grade)
         for idx, grade in enumerate(course_grades):
             # Handle tie scores - same grade gets same rank
             if previous_grade is not None and grade.percent_grade < previous_grade:
@@ -207,6 +211,35 @@ class LeaderboardTabView(RetrieveAPIView):
 
             previous_grade = grade.percent_grade
 
+        # Then, add users WITHOUT grades (they get 0% and rank at the end)
+        users_with_grades_ids = set(grades_dict.keys())
+        users_without_grades = [user for user in all_users if user.id not in users_with_grades_ids]
+
+        # All users without grades get the same rank (one position after the last graded user)
+        no_grade_rank = len(leaderboard_data) + 1 if leaderboard_data else 1
+
+        for user in sorted(users_without_grades, key=lambda u: u.username):
+            try:
+                display_name = user.profile.name if user.profile.name else user.username
+            except:
+                display_name = user.username
+
+            entry = {
+                'rank': no_grade_rank,
+                'user_id': user.id,
+                'username': user.username,
+                'display_name': display_name,
+                'grade_percent': 0.0,
+                'letter_grade': '',
+                'is_passing': False,
+                'is_current_user': user.id == request.user.id,
+            }
+
+            leaderboard_data.append(entry)
+
+            if user.id == request.user.id:
+                current_user_entry = entry
+
         # Calculate current user rank info
         total_students = len(leaderboard_data)
         current_user_rank_info = None
@@ -215,8 +248,13 @@ class LeaderboardTabView(RetrieveAPIView):
         import logging
         log = logging.getLogger(__name__)
         log.info(f"[Leaderboard] Request user ID: {request.user.id}")
-        log.info(f"[Leaderboard] Total students with grades: {total_students}")
-        log.info(f"[Leaderboard] Current user found in grades: {current_user_entry is not None}")
+        log.info(f"[Leaderboard] Total enrolled users: {len(enrolled_user_ids)}")
+        log.info(f"[Leaderboard] Users with grades: {len(grades_dict)}")
+        log.info(f"[Leaderboard] Users without grades: {len(users_without_grades)}")
+        log.info(f"[Leaderboard] Total in leaderboard: {total_students}")
+        log.info(f"[Leaderboard] Current user found: {current_user_entry is not None}")
+        if current_user_entry:
+            log.info(f"[Leaderboard] Current user rank: {current_user_entry['rank']}, grade: {current_user_entry['grade_percent']}%")
 
         if current_user_entry:
             percentile = ((total_students - current_user_entry['rank']) / total_students * 100) if total_students > 0 else 0
