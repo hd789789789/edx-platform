@@ -75,15 +75,33 @@ urlpatterns += [
     ),
 ]
 
+# Top Grades Leaderboard URLs (MUST be before progress to avoid pattern conflict)
+urlpatterns += [
+    re_path(
+        fr'^top-grades/{settings.COURSE_KEY_PATTERN}$',
+        TopGradesView.as_view(),
+        name='top-grades'
+    ),
+]
+
+# Top Progress Leaderboard URLs (MUST be before progress to avoid pattern conflict)
+urlpatterns += [
+    re_path(
+        fr'^top-progress/{settings.COURSE_KEY_PATTERN}$',
+        TopProgressView.as_view(),
+        name='top-progress'
+    ),
+]
+
 # Progress Tab URLs
 urlpatterns += [
     re_path(
-        fr'progress/{settings.COURSE_KEY_PATTERN}/(?P<student_id>[^/]+)',
+        fr'^progress/{settings.COURSE_KEY_PATTERN}/(?P<student_id>[^/]+)$',
         ProgressTabView.as_view(),
         name='progress-tab-other-student'
     ),
     re_path(
-        fr'progress/{settings.COURSE_KEY_PATTERN}',
+        fr'^progress/{settings.COURSE_KEY_PATTERN}$',
         ProgressTabView.as_view(),
         name='progress-tab'
     ),
@@ -92,26 +110,8 @@ urlpatterns += [
 # Leaderboard Tab URLs
 urlpatterns += [
     re_path(
-        fr'leaderboard/{settings.COURSE_KEY_PATTERN}',
+        fr'^leaderboard/{settings.COURSE_KEY_PATTERN}$',
         LeaderboardTabView.as_view(),
         name='leaderboard-tab'
-    ),
-]
-
-# Top Grades Leaderboard URLs
-urlpatterns += [
-    re_path(
-        fr'top-grades/{settings.COURSE_KEY_PATTERN}',
-        TopGradesView.as_view(),
-        name='top-grades'
-    ),
-]
-
-# Top Progress Leaderboard URLs
-urlpatterns += [
-    re_path(
-        fr'top-progress/{settings.COURSE_KEY_PATTERN}',
-        TopProgressView.as_view(),
-        name='top-progress'
     ),
 ]
