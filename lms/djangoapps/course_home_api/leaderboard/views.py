@@ -93,15 +93,20 @@ class LeaderboardTabView(RetrieveAPIView):
         active_enrollments = CourseEnrollment.objects.filter(
             course_id=course_key,
             is_active=True
-        ).select_related('user')
+        ).values_list('user_id', flat=True)
 
         # Get persistent course grades for all enrolled students
         # Only include students with grades > 0 to filter out inactive students
         course_grades = PersistentCourseGrade.objects.filter(
             course_id=course_key,
-            user_id__in=active_enrollments.values_list('user_id', flat=True),
+            user_id__in=active_enrollments,
             percent_grade__gt=0  # Filter out students with no activity
-        ).select_related('user').order_by('-percent_grade', 'user__username')
+        ).order_by('-percent_grade', 'user_id')
+
+        # Get all user data in one query for efficiency
+        user_ids = [grade.user_id for grade in course_grades]
+        users = User.objects.filter(id__in=user_ids).select_related('profile')
+        users_dict = {user.id: user for user in users}
 
         # Build leaderboard data
         leaderboard_data = []
@@ -114,11 +119,21 @@ class LeaderboardTabView(RetrieveAPIView):
             if previous_grade is not None and grade.percent_grade < previous_grade:
                 rank = idx + 1
 
+            user = users_dict.get(grade.user_id)
+            if not user:
+                continue
+
+            # Get display name from profile or fallback to username
+            try:
+                display_name = user.profile.name if user.profile.name else user.username
+            except:
+                display_name = user.username
+
             entry = {
                 'rank': rank,
                 'user_id': grade.user_id,
-                'username': grade.user.username,
-                'display_name': grade.user.profile.name if hasattr(grade.user, 'profile') else grade.user.username,
+                'username': user.username,
+                'display_name': display_name,
                 'grade_percent': grade.percent_grade * 100,  # Convert to percentage
                 'letter_grade': grade.letter_grade or '',
                 'is_passing': grade.passed_timestamp is not None,
