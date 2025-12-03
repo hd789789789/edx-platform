@@ -17,6 +17,7 @@ from common.djangoapps.student.models import CourseEnrollment
 from lms.djangoapps.course_home_api.leaderboard.serializers import LeaderboardTabSerializer
 from lms.djangoapps.course_home_api.utils import get_course_or_403
 from lms.djangoapps.courseware.access import has_access
+from lms.djangoapps.courseware.courses import get_course_blocks_completion_summary
 from lms.djangoapps.grades.models import PersistentCourseGrade
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
@@ -43,8 +44,8 @@ class LeaderboardTabView(RetrieveAPIView):
             rank: (int) Student's rank position (1-based)
             username: (str) Student's username (or anonymized if configured)
             display_name: (str) Student's display name
-            grade_percent: (float) Student's course grade percentage (0-100)
-            letter_grade: (str) Student's letter grade (A, B, C, D, Pass, etc.)
+            grade_percent: (float) Student's course completion percentage (0-100)
+            letter_grade: (str) Student's letter grade (A, B, C, D, Pass, etc.) from grading
             is_passing: (bool) Whether student has passing grade
             is_current_user: (bool) Whether this entry is the current user
         current_user_rank: Object containing current user's rank info:
@@ -95,150 +96,78 @@ class LeaderboardTabView(RetrieveAPIView):
             is_active=True
         )
 
-        # Get persistent course grades for all enrolled students
-        # Include students with percent_grade >= 0 (including those with 0%)
-        course_grades = PersistentCourseGrade.objects.filter(
-            course_id=course_key,
-            user_id__in=active_enrollments.values_list('user_id', flat=True)
-        ).order_by('-percent_grade', 'user_id')
-
-        # If no grades exist yet, create placeholder entries for enrolled students
-        if not course_grades.exists() and active_enrollments.exists():
-            # This means students are enrolled but grades haven't been calculated yet
-            # We'll show them all with 0% grade
-            enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
-            users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile').order_by('username')
-
-            leaderboard_data = []
-            for idx, user in enumerate(users):
-                try:
-                    display_name = user.profile.name if user.profile.name else user.username
-                except:
-                    display_name = user.username
-
-                entry = {
-                    'rank': 1,  # All have rank 1 when grade is 0
-                    'user_id': user.id,
-                    'username': user.username,
-                    'display_name': display_name,
-                    'grade_percent': 0.0,
-                    'letter_grade': '',
-                    'is_passing': False,
-                    'is_current_user': user.id == request.user.id,
-                }
-                leaderboard_data.append(entry)
-
-            # Find current user
-            current_user_entry = None
-            for entry in leaderboard_data:
-                if entry['is_current_user']:
-                    current_user_entry = entry
-                    break
-
-            # Debug logging
-            import logging
-            log = logging.getLogger(__name__)
-            log.info(f"[Leaderboard] Request user ID: {request.user.id}")
-            log.info(f"[Leaderboard] Enrolled user IDs: {enrolled_user_ids}")
-            log.info(f"[Leaderboard] Current user found: {current_user_entry is not None}")
-
-            total_students = len(leaderboard_data)
-            current_user_rank_info = None
-            if current_user_entry:
-                current_user_rank_info = {
-                    'rank': current_user_entry['rank'],
-                    'total_students': total_students,
-                    'percentile': 0.0,
-                }
-
-            data = {
-                'course_id': course_key_string,
-                'leaderboard': leaderboard_data,
-                'current_user_rank': current_user_rank_info,
-                'total_students': total_students,
-                'top_performers': leaderboard_data[:3] if len(leaderboard_data) >= 3 else leaderboard_data,
-                'course_name': course_overview.display_name,
-            }
-
-            serializer = self.get_serializer_class()(data)
-            return Response(serializer.data)
-
-        # Get all enrolled users (not just those with grades)
+        # Get all enrolled users
         enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
         all_users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
-        users_dict = {user.id: user for user in all_users}
 
-        # Create a dict of grades by user_id for quick lookup
+        # Get persistent course grades for letter grade and passing status
+        course_grades = PersistentCourseGrade.objects.filter(
+            course_id=course_key,
+            user_id__in=enrolled_user_ids
+        )
         grades_dict = {grade.user_id: grade for grade in course_grades}
 
-        # Build leaderboard data
-        leaderboard_data = []
-        current_user_entry = None
-        rank = 1
-        previous_grade = None
+        # Calculate completion percentage for all users
+        completion_data = []
+        for user in all_users:
+            completion_summary = get_course_blocks_completion_summary(course_key, user)
+            complete_count = completion_summary.get('complete_count', 0)
+            incomplete_count = completion_summary.get('incomplete_count', 0)
+            locked_count = completion_summary.get('locked_count', 0)
+            total_units = complete_count + incomplete_count + locked_count
 
-        # First, add users with grades (sorted by grade)
-        for idx, grade in enumerate(course_grades):
-            # Handle tie scores - same grade gets same rank
-            if previous_grade is not None and grade.percent_grade < previous_grade:
-                rank = idx + 1
+            completion_percent = (complete_count / total_units * 100) if total_units > 0 else 0.0
 
-            user = users_dict.get(grade.user_id)
-            if not user:
-                continue
+            # Get grade info for letter grade and passing status
+            grade = grades_dict.get(user.id)
 
-            # Get display name from profile or fallback to username
             try:
                 display_name = user.profile.name if user.profile.name else user.username
             except:
                 display_name = user.username
 
-            entry = {
-                'rank': rank,
-                'user_id': grade.user_id,
-                'username': user.username,
-                'display_name': display_name,
-                'grade_percent': grade.percent_grade * 100,  # Convert to percentage
-                'letter_grade': grade.letter_grade or '',
-                'is_passing': grade.passed_timestamp is not None,
-                'is_current_user': grade.user_id == request.user.id,
-            }
-
-            leaderboard_data.append(entry)
-
-            if grade.user_id == request.user.id:
-                current_user_entry = entry
-
-            previous_grade = grade.percent_grade
-
-        # Then, add users WITHOUT grades (they get 0% and rank at the end)
-        users_with_grades_ids = set(grades_dict.keys())
-        users_without_grades = [user for user in all_users if user.id not in users_with_grades_ids]
-
-        # All users without grades get the same rank (one position after the last graded user)
-        no_grade_rank = len(leaderboard_data) + 1 if leaderboard_data else 1
-
-        for user in sorted(users_without_grades, key=lambda u: u.username):
-            try:
-                display_name = user.profile.name if user.profile.name else user.username
-            except:
-                display_name = user.username
-
-            entry = {
-                'rank': no_grade_rank,
+            completion_data.append({
+                'user': user,
                 'user_id': user.id,
                 'username': user.username,
                 'display_name': display_name,
-                'grade_percent': 0.0,
-                'letter_grade': '',
-                'is_passing': False,
+                'completion_percent': completion_percent,
+                'letter_grade': grade.letter_grade if grade else '',
+                'is_passing': grade.passed_timestamp is not None if grade else False,
                 'is_current_user': user.id == request.user.id,
+            })
+
+        # Sort by completion percentage (highest first), then by username for ties
+        completion_data.sort(key=lambda x: (-x['completion_percent'], x['username']))
+
+        # Build leaderboard with ranking
+        leaderboard_data = []
+        current_user_entry = None
+        rank = 1
+        previous_completion = None
+
+        for idx, entry in enumerate(completion_data):
+            # Handle tie scores - same completion gets same rank
+            if previous_completion is not None and entry['completion_percent'] < previous_completion:
+                rank = idx + 1
+
+            leaderboard_entry = {
+                'rank': rank,
+                'user_id': entry['user_id'],
+                'username': entry['username'],
+                'display_name': entry['display_name'],
+                'grade_percent': entry['completion_percent'],  # Using completion_percent in grade_percent field
+                'letter_grade': entry['letter_grade'],
+                'is_passing': entry['is_passing'],
+                'is_current_user': entry['is_current_user'],
             }
 
-            leaderboard_data.append(entry)
+            leaderboard_data.append(leaderboard_entry)
 
-            if user.id == request.user.id:
-                current_user_entry = entry
+            if entry['is_current_user']:
+                current_user_entry = leaderboard_entry
+
+            previous_completion = entry['completion_percent']
 
         # Calculate current user rank info
         total_students = len(leaderboard_data)
@@ -250,11 +179,10 @@ class LeaderboardTabView(RetrieveAPIView):
         log.info(f"[Leaderboard] Request user ID: {request.user.id}")
         log.info(f"[Leaderboard] Total enrolled users: {len(enrolled_user_ids)}")
         log.info(f"[Leaderboard] Users with grades: {len(grades_dict)}")
-        log.info(f"[Leaderboard] Users without grades: {len(users_without_grades)}")
         log.info(f"[Leaderboard] Total in leaderboard: {total_students}")
         log.info(f"[Leaderboard] Current user found: {current_user_entry is not None}")
         if current_user_entry:
-            log.info(f"[Leaderboard] Current user rank: {current_user_entry['rank']}, grade: {current_user_entry['grade_percent']}%")
+            log.info(f"[Leaderboard] Current user rank: {current_user_entry['rank']}, completion: {current_user_entry['grade_percent']}%")
 
         if current_user_entry:
             percentile = ((total_students - current_user_entry['rank']) / total_students * 100) if total_students > 0 else 0
