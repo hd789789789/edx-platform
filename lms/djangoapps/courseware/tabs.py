@@ -316,6 +316,40 @@ class DatesTab(EnrolledTab):
         super().__init__(tab_dict)
 
 
+class LeaderboardTab(EnrolledTab):
+    """
+    A tab representing the course leaderboard showing student rankings.
+    """
+    type = "leaderboard"
+    title = gettext_noop("Leaderboard")
+    priority = 25
+    view_name = "leaderboard"
+    is_hideable = True
+    is_default = False
+    is_dynamic = True
+
+    def __init__(self, tab_dict=None):
+        if tab_dict is None:
+            tab_dict = {}
+
+        def link_func(course, _reverse_func):
+            return get_learning_mfe_home_url(course_key=course.id, url_fragment='leaderboard')
+
+        tab_dict['link_func'] = link_func
+        tab_dict['type'] = self.type
+        super().__init__(tab_dict)
+
+    @classmethod
+    def is_enabled(cls, course, user=None):
+        """
+        Leaderboard tab is enabled for enrolled users unless explicitly disabled.
+        """
+        if not super().is_enabled(course, user=user):
+            return False
+        # Check if course has disabled leaderboard
+        return not getattr(course, 'hide_leaderboard_tab', False)
+
+
 def get_course_tab_list(user, course):
     """
     Retrieves the course tab list from xmodule.tabs and manipulates the set as necessary

@@ -72,6 +72,7 @@ setup(
             "external_link = lms.djangoapps.courseware.tabs:ExternalLinkCourseTab",
             "html_textbooks = lms.djangoapps.courseware.tabs:HtmlTextbookTabs",
             "instructor = lms.djangoapps.instructor.views.instructor_dashboard:InstructorDashboardTab",
+            "leaderboard = lms.djangoapps.courseware.tabs:LeaderboardTab",
             "lti_discussion = openedx.features.lti_course_tab.tab:DiscussionLtiCourseTab",
             "lti_live = openedx.core.djangoapps.course_live.tab:CourseLiveTab",
             "lti_tab = openedx.features.lti_course_tab.tab:LtiCourseTab",
