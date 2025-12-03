@@ -310,43 +310,57 @@ class TopGradesView(RetrieveAPIView):
         enrolled_user_ids = list(
             active_enrollments.values_list('user_id', flat=True))
 
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(f"[TopGrades] Total enrolled users: {len(enrolled_user_ids)}")
+
+        # Get ALL enrolled users (not just those with grades)
+        all_users = User.objects.filter(
+            id__in=enrolled_user_ids).select_related('profile')
+
         # Get persistent course grades - this is the actual grade data
         # Note: PersistentCourseGrade.user_id is IntegerField, not ForeignKey
         course_grades = PersistentCourseGrade.objects.filter(
             course_id=course_key,
             user_id__in=enrolled_user_ids
         )
+        grades_dict = {grade.user_id: grade for grade in course_grades}
+        log.info(f"[TopGrades] Users with grades: {len(grades_dict)}")
 
-        # Get all users with their profiles for display names
-        graded_user_ids = [grade.user_id for grade in course_grades]
-        users = User.objects.filter(
-            id__in=graded_user_ids).select_related('profile')
-        users_dict = {user.id: user for user in users}
-
-        # Build grades data
+        # Build grades data for ALL enrolled users
         grades_data = []
-        for grade in course_grades:
-            user = users_dict.get(grade.user_id)
-            if not user:
-                continue
+        for user in all_users:
+            grade = grades_dict.get(user.id)
 
             try:
                 display_name = user.profile.name if user.profile.name else user.username
             except Exception:
                 display_name = user.username
 
-            grade_percent = round(grade.percent_grade *
-                                  100, 2) if grade.percent_grade else 0.0
+            # If user has grade record, use it; otherwise show 0%
+            if grade:
+                grade_percent = round(
+                    grade.percent_grade * 100, 2) if grade.percent_grade else 0.0
+                letter_grade = grade.letter_grade or ''
+                is_passed = grade.passed_timestamp is not None
+                passed_date = grade.passed_timestamp.isoformat() if grade.passed_timestamp else None
+                grade_modified = grade.modified.isoformat() if grade.modified else None
+            else:
+                grade_percent = 0.0
+                letter_grade = ''
+                is_passed = False
+                passed_date = None
+                grade_modified = None
 
             grades_data.append({
                 'user_id': user.id,
                 'username': user.username,
                 'full_name': display_name,
                 'grade_percentage': grade_percent,
-                'letter_grade': grade.letter_grade or '',
-                'is_passed': grade.passed_timestamp is not None,
-                'passed_date': grade.passed_timestamp.isoformat() if grade.passed_timestamp else None,
-                'grade_modified': grade.modified.isoformat() if grade.modified else None,
+                'letter_grade': letter_grade,
+                'is_passed': is_passed,
+                'passed_date': passed_date,
+                'grade_modified': grade_modified,
                 'is_current_user': user.id == request.user.id,
             })
 
@@ -368,13 +382,16 @@ class TopGradesView(RetrieveAPIView):
             })
             prev_grade = entry['grade_percentage']
 
-        # Calculate summary statistics
+        # Calculate summary statistics from ALL enrolled students
         all_grades = [g['grade_percentage'] for g in grades_data]
-        total_students = len(all_grades)
-        avg_grade = round(sum(all_grades) / total_students,
-                          2) if total_students > 0 else 0
+        # Total enrolled, not just those with grades
+        total_students = len(enrolled_user_ids)
+        avg_grade = round(sum(all_grades) / len(all_grades),
+                          2) if all_grades else 0
         max_grade = max(all_grades) if all_grades else 0
         min_grade = min(all_grades) if all_grades else 0
+        log.info(
+            f"[TopGrades] Stats - total: {total_students}, avg: {avg_grade}, max: {max_grade}")
 
         # Limit results
         top_students = top_students[:limit]
@@ -472,26 +489,24 @@ class TopProgressView(RetrieveAPIView):
         if not ((enrollment and enrollment.is_active) or is_staff):
             return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
 
-        # Get all active enrollments for this course
+        # Get all active enrollments for this course (no date filter - show all users)
         enrollments_qs = CourseEnrollment.objects.filter(
             course_id=course_key,
             is_active=True
         )
 
-        # Filter by period if specified
-        now = timezone.now()
-        if period == 'week':
-            start_date = now - timedelta(days=7)
-            enrollments_qs = enrollments_qs.filter(created__gte=start_date)
-        elif period == 'month':
-            start_date = now - timedelta(days=30)
-            enrollments_qs = enrollments_qs.filter(created__gte=start_date)
-        # 'all' means no date filter
+        # Note: period filter will be used for display purposes only
+        # All enrolled users are always included in the leaderboard
 
         enrolled_user_ids = list(
             enrollments_qs.values_list('user_id', flat=True))
         all_users = User.objects.filter(
             id__in=enrolled_user_ids).select_related('profile')
+
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(
+            f"[TopProgress] Total enrolled users: {len(enrolled_user_ids)}")
 
         # Calculate completion percentage for all users
         progress_data = []
