@@ -2,9 +2,11 @@
 Leaderboard Tab Views
 """
 
+from datetime import datetime, timedelta
 from django.contrib.auth import get_user_model
 from django.http.response import Http404
 from django.db.models import Q
+from django.utils import timezone
 from edx_django_utils import monitoring as monitoring_utils
 from edx_rest_framework_extensions.auth.jwt.authentication import JwtAuthentication
 from edx_rest_framework_extensions.auth.session.authentication import SessionAuthenticationAllowInactiveUser
@@ -14,7 +16,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from common.djangoapps.student.models import CourseEnrollment
-from lms.djangoapps.course_home_api.leaderboard.serializers import LeaderboardTabSerializer
+from lms.djangoapps.course_home_api.leaderboard.serializers import (
+    LeaderboardTabSerializer,
+    TopGradesSerializer,
+    TopProgressSerializer,
+)
 from lms.djangoapps.course_home_api.utils import get_course_or_403
 from lms.djangoapps.courseware.access import has_access
 from lms.djangoapps.courseware.courses import get_course_blocks_completion_summary
@@ -203,6 +209,323 @@ class LeaderboardTabView(RetrieveAPIView):
             'total_students': total_students,
             'top_performers': top_performers,
             'course_name': course_overview.display_name,
+        }
+
+        serializer = self.get_serializer_class()(data)
+        return Response(serializer.data)
+
+
+class TopGradesView(RetrieveAPIView):
+    """
+    **Use Cases**
+
+        Request top students by grade for a specific course
+
+    **Example Requests**
+
+        GET api/course_home/top-grades/{course_key}?limit=10
+
+    **Query Parameters**
+
+        limit: (int) Number of top students to return (default: 10)
+
+    **Response Values**
+
+        Body consists of the following fields:
+
+        success: (bool) Whether the request was successful
+        course_id: (str) The course key string
+        leaderboard_type: (str) Always "grades"
+        timestamp: (str) ISO format timestamp
+        summary: Object containing:
+            total_students: (int) Total number of graded students
+            avg_grade: (float) Average grade percentage
+            max_grade: (float) Highest grade percentage
+            min_grade: (float) Lowest grade percentage
+            top_count: (int) Number of students returned
+        top_students: List of student objects, each containing:
+            rank: (int) Student's rank position
+            user_id: (int) Student's user ID
+            username: (str) Student's username
+            full_name: (str) Student's display name
+            grade_percentage: (float) Student's grade percentage (0-100)
+            letter_grade: (str) Student's letter grade
+            is_passed: (bool) Whether student has passed
+            is_current_user: (bool) Whether this entry is the current user
+
+    **Returns**
+
+        * 200 on success with above fields.
+        * 401 if the user is not authenticated or not enrolled.
+        * 403 if the user does not have access to the course.
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (IsAuthenticated,)
+    serializer_class = TopGradesSerializer
+
+    def get(self, request, *args, **kwargs):
+        course_key_string = kwargs.get('course_key_string')
+        course_key = CourseKey.from_string(course_key_string)
+
+        # Get query parameters
+        limit = int(request.query_params.get('limit', 10))
+
+        # Enable NR tracing for this view based on course
+        monitoring_utils.set_custom_attribute('course_id', course_key_string)
+        monitoring_utils.set_custom_attribute('user_id', request.user.id)
+
+        # Check if user has access to course
+        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+
+        # Check if user is enrolled in the course
+        enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
+        is_staff = bool(has_access(request.user, 'staff', course_key))
+
+        if not ((enrollment and enrollment.is_active) or is_staff):
+            return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
+
+        # Get all active enrollments for this course
+        active_enrollments = CourseEnrollment.objects.filter(
+            course_id=course_key,
+            is_active=True
+        )
+        enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
+
+        # Get persistent course grades - this is the actual grade data
+        course_grades = PersistentCourseGrade.objects.filter(
+            course_id=course_key,
+            user_id__in=enrolled_user_ids
+        ).select_related('user')
+
+        # Build grades data
+        grades_data = []
+        for grade in course_grades:
+            user = grade.user
+            try:
+                display_name = user.profile.name if user.profile.name else user.username
+            except:
+                display_name = user.username
+
+            grade_percent = round(grade.percent_grade * 100, 2) if grade.percent_grade else 0.0
+
+            grades_data.append({
+                'user_id': user.id,
+                'username': user.username,
+                'full_name': display_name,
+                'grade_percentage': grade_percent,
+                'letter_grade': grade.letter_grade or '',
+                'is_passed': grade.passed_timestamp is not None,
+                'passed_date': grade.passed_timestamp.isoformat() if grade.passed_timestamp else None,
+                'grade_modified': grade.modified.isoformat() if grade.modified else None,
+                'is_current_user': user.id == request.user.id,
+            })
+
+        # Sort by grade percentage (highest first), then by username for ties
+        grades_data.sort(key=lambda x: (-x['grade_percentage'], x['username']))
+
+        # Calculate ranks with tie handling
+        top_students = []
+        rank = 1
+        prev_grade = None
+
+        for idx, entry in enumerate(grades_data):
+            if prev_grade is not None and entry['grade_percentage'] < prev_grade:
+                rank = idx + 1
+
+            top_students.append({
+                'rank': rank,
+                **entry
+            })
+            prev_grade = entry['grade_percentage']
+
+        # Calculate summary statistics
+        all_grades = [g['grade_percentage'] for g in grades_data]
+        total_students = len(all_grades)
+        avg_grade = round(sum(all_grades) / total_students, 2) if total_students > 0 else 0
+        max_grade = max(all_grades) if all_grades else 0
+        min_grade = min(all_grades) if all_grades else 0
+
+        # Limit results
+        top_students = top_students[:limit]
+
+        data = {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'grades',
+            'timestamp': timezone.now().isoformat(),
+            'summary': {
+                'total_students': total_students,
+                'avg_grade': avg_grade,
+                'max_grade': max_grade,
+                'min_grade': min_grade,
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
+        }
+
+        serializer = self.get_serializer_class()(data)
+        return Response(serializer.data)
+
+
+class TopProgressView(RetrieveAPIView):
+    """
+    **Use Cases**
+
+        Request top students by progress (completion) for a specific course
+
+    **Example Requests**
+
+        GET api/course_home/top-progress/{course_key}?period=all&limit=10
+
+    **Query Parameters**
+
+        period: (str) Time period filter - 'week', 'month', or 'all' (default: 'all')
+        limit: (int) Number of top students to return (default: 10)
+
+    **Response Values**
+
+        Body consists of the following fields:
+
+        success: (bool) Whether the request was successful
+        course_id: (str) The course key string
+        leaderboard_type: (str) Always "progress"
+        period: (str) The time period filter used
+        timestamp: (str) ISO format timestamp
+        summary: Object containing:
+            total_students_with_progress: (int) Total students with progress data
+            avg_progress: (float) Average progress percentage
+            top_count: (int) Number of students returned
+        top_students: List of student objects, each containing:
+            rank: (int) Student's rank position
+            user_id: (int) Student's user ID
+            username: (str) Student's username
+            full_name: (str) Student's display name
+            progress_percent: (float) Student's completion percentage (0-100)
+            is_current_user: (bool) Whether this entry is the current user
+
+    **Returns**
+
+        * 200 on success with above fields.
+        * 401 if the user is not authenticated or not enrolled.
+        * 403 if the user does not have access to the course.
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (IsAuthenticated,)
+    serializer_class = TopProgressSerializer
+
+    def get(self, request, *args, **kwargs):
+        course_key_string = kwargs.get('course_key_string')
+        course_key = CourseKey.from_string(course_key_string)
+
+        # Get query parameters
+        period = request.query_params.get('period', 'all')
+        limit = int(request.query_params.get('limit', 10))
+
+        # Enable NR tracing for this view based on course
+        monitoring_utils.set_custom_attribute('course_id', course_key_string)
+        monitoring_utils.set_custom_attribute('user_id', request.user.id)
+
+        # Check if user has access to course
+        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+
+        # Check if user is enrolled in the course
+        enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
+        is_staff = bool(has_access(request.user, 'staff', course_key))
+
+        if not ((enrollment and enrollment.is_active) or is_staff):
+            return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
+
+        # Get all active enrollments for this course
+        enrollments_qs = CourseEnrollment.objects.filter(
+            course_id=course_key,
+            is_active=True
+        )
+
+        # Filter by period if specified
+        now = timezone.now()
+        if period == 'week':
+            start_date = now - timedelta(days=7)
+            enrollments_qs = enrollments_qs.filter(created__gte=start_date)
+        elif period == 'month':
+            start_date = now - timedelta(days=30)
+            enrollments_qs = enrollments_qs.filter(created__gte=start_date)
+        # 'all' means no date filter
+
+        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
+        all_users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+
+        # Calculate completion percentage for all users
+        progress_data = []
+        for user in all_users:
+            completion_summary = get_course_blocks_completion_summary(course_key, user)
+            complete_count = completion_summary.get('complete_count', 0)
+            incomplete_count = completion_summary.get('incomplete_count', 0)
+            locked_count = completion_summary.get('locked_count', 0)
+            total_units = complete_count + incomplete_count + locked_count
+
+            completion_percent = round((complete_count / total_units * 100), 2) if total_units > 0 else 0.0
+
+            try:
+                display_name = user.profile.name if user.profile.name else user.username
+            except:
+                display_name = user.username
+
+            progress_data.append({
+                'user_id': user.id,
+                'username': user.username,
+                'full_name': display_name,
+                'progress_percent': completion_percent,
+                'is_current_user': user.id == request.user.id,
+            })
+
+        # Sort by progress percentage (highest first), then by username for ties
+        progress_data.sort(key=lambda x: (-x['progress_percent'], x['username']))
+
+        # Calculate ranks with tie handling
+        top_students = []
+        rank = 1
+        prev_progress = None
+
+        for idx, entry in enumerate(progress_data):
+            if prev_progress is not None and entry['progress_percent'] < prev_progress:
+                rank = idx + 1
+
+            top_students.append({
+                'rank': rank,
+                **entry
+            })
+            prev_progress = entry['progress_percent']
+
+        # Calculate summary statistics
+        all_progress = [p['progress_percent'] for p in progress_data]
+        total_students = len(all_progress)
+        avg_progress = round(sum(all_progress) / total_students, 2) if total_students > 0 else 0
+
+        # Limit results
+        top_students = top_students[:limit]
+
+        data = {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'progress',
+            'period': period,
+            'timestamp': timezone.now().isoformat(),
+            'summary': {
+                'total_students_with_progress': total_students,
+                'avg_progress': avg_progress,
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
         }
 
         serializer = self.get_serializer_class()(data)

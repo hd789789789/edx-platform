@@ -16,7 +16,11 @@ from lms.djangoapps.course_home_api.outline.views import (
     unsubscribe_from_course_goal_by_token,
 )
 from lms.djangoapps.course_home_api.progress.views import ProgressTabView
-from lms.djangoapps.course_home_api.leaderboard.views import LeaderboardTabView
+from lms.djangoapps.course_home_api.leaderboard.views import (
+    LeaderboardTabView,
+    TopGradesView,
+    TopProgressView,
+)
 
 # This API is a BFF ("backend for frontend") designed for the learning MFE. It's not versioned because there is no
 # guarantee of stability over time. It may change from one Open edX release to another. Don't write any scripts
@@ -91,5 +95,23 @@ urlpatterns += [
         fr'leaderboard/{settings.COURSE_KEY_PATTERN}',
         LeaderboardTabView.as_view(),
         name='leaderboard-tab'
+    ),
+]
+
+# Top Grades Leaderboard URLs
+urlpatterns += [
+    re_path(
+        fr'top-grades/{settings.COURSE_KEY_PATTERN}',
+        TopGradesView.as_view(),
+        name='top-grades'
+    ),
+]
+
+# Top Progress Leaderboard URLs
+urlpatterns += [
+    re_path(
+        fr'top-progress/{settings.COURSE_KEY_PATTERN}',
+        TopProgressView.as_view(),
+        name='top-progress'
     ),
 ]
