@@ -93,15 +93,68 @@ class LeaderboardTabView(RetrieveAPIView):
         active_enrollments = CourseEnrollment.objects.filter(
             course_id=course_key,
             is_active=True
-        ).values_list('user_id', flat=True)
+        )
 
         # Get persistent course grades for all enrolled students
-        # Only include students with grades > 0 to filter out inactive students
+        # Include students with percent_grade >= 0 (including those with 0%)
         course_grades = PersistentCourseGrade.objects.filter(
             course_id=course_key,
-            user_id__in=active_enrollments,
-            percent_grade__gt=0  # Filter out students with no activity
+            user_id__in=active_enrollments.values_list('user_id', flat=True)
         ).order_by('-percent_grade', 'user_id')
+
+        # If no grades exist yet, create placeholder entries for enrolled students
+        if not course_grades.exists() and active_enrollments.exists():
+            # This means students are enrolled but grades haven't been calculated yet
+            # We'll show them all with 0% grade
+            enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
+            users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+
+            leaderboard_data = []
+            for idx, user in enumerate(users):
+                try:
+                    display_name = user.profile.name if user.profile.name else user.username
+                except:
+                    display_name = user.username
+
+                entry = {
+                    'rank': idx + 1,
+                    'user_id': user.id,
+                    'username': user.username,
+                    'display_name': display_name,
+                    'grade_percent': 0.0,
+                    'letter_grade': '',
+                    'is_passing': False,
+                    'is_current_user': user.id == request.user.id,
+                }
+                leaderboard_data.append(entry)
+
+            # Find current user
+            current_user_entry = None
+            for entry in leaderboard_data:
+                if entry['is_current_user']:
+                    current_user_entry = entry
+                    break
+
+            total_students = len(leaderboard_data)
+            current_user_rank_info = None
+            if current_user_entry:
+                current_user_rank_info = {
+                    'rank': current_user_entry['rank'],
+                    'total_students': total_students,
+                    'percentile': 0.0,
+                }
+
+            data = {
+                'course_id': course_key_string,
+                'leaderboard': leaderboard_data,
+                'current_user_rank': current_user_rank_info,
+                'total_students': total_students,
+                'top_performers': leaderboard_data[:3] if len(leaderboard_data) >= 3 else leaderboard_data,
+                'course_name': course_overview.display_name,
+            }
+
+            serializer = self.get_serializer_class()(data)
+            return Response(serializer.data)
 
         # Get all user data in one query for efficiency
         user_ids = [grade.user_id for grade in course_grades]
