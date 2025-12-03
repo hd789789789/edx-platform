@@ -321,7 +321,7 @@ class LeaderboardTab(EnrolledTab):
     A tab representing the course leaderboard showing student rankings.
     """
     type = "leaderboard"
-    title = gettext_noop("Leaderboard")
+    title = gettext_noop("🏆 Học đua")
     priority = 25
     view_name = "leaderboard"
     is_hideable = True
