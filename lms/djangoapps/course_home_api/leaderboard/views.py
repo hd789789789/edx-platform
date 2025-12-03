@@ -107,7 +107,7 @@ class LeaderboardTabView(RetrieveAPIView):
             # This means students are enrolled but grades haven't been calculated yet
             # We'll show them all with 0% grade
             enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
-            users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+            users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile').order_by('username')
 
             leaderboard_data = []
             for idx, user in enumerate(users):
@@ -117,7 +117,7 @@ class LeaderboardTabView(RetrieveAPIView):
                     display_name = user.username
 
                 entry = {
-                    'rank': idx + 1,
+                    'rank': 1,  # All have rank 1 when grade is 0
                     'user_id': user.id,
                     'username': user.username,
                     'display_name': display_name,
@@ -134,6 +134,13 @@ class LeaderboardTabView(RetrieveAPIView):
                 if entry['is_current_user']:
                     current_user_entry = entry
                     break
+
+            # Debug logging
+            import logging
+            log = logging.getLogger(__name__)
+            log.info(f"[Leaderboard] Request user ID: {request.user.id}")
+            log.info(f"[Leaderboard] Enrolled user IDs: {enrolled_user_ids}")
+            log.info(f"[Leaderboard] Current user found: {current_user_entry is not None}")
 
             total_students = len(leaderboard_data)
             current_user_rank_info = None
@@ -203,6 +210,13 @@ class LeaderboardTabView(RetrieveAPIView):
         # Calculate current user rank info
         total_students = len(leaderboard_data)
         current_user_rank_info = None
+
+        # Debug logging
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(f"[Leaderboard] Request user ID: {request.user.id}")
+        log.info(f"[Leaderboard] Total students with grades: {total_students}")
+        log.info(f"[Leaderboard] Current user found in grades: {current_user_entry is not None}")
 
         if current_user_entry:
             percentile = ((total_students - current_user_entry['rank']) / total_students * 100) if total_students > 0 else 0
