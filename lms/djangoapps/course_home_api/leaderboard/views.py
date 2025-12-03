@@ -86,7 +86,8 @@ class LeaderboardTabView(RetrieveAPIView):
         monitoring_utils.set_custom_attribute('user_id', request.user.id)
 
         # Check if user has access to course
-        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+        course = get_course_or_403(
+            request.user, 'load', course_key, check_if_enrolled=False)
         course_overview = CourseOverview.get_from_id(course_key)
 
         # Check if user is enrolled in the course
@@ -103,8 +104,10 @@ class LeaderboardTabView(RetrieveAPIView):
         )
 
         # Get all enrolled users
-        enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
-        all_users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+        enrolled_user_ids = list(
+            active_enrollments.values_list('user_id', flat=True))
+        all_users = User.objects.filter(
+            id__in=enrolled_user_ids).select_related('profile')
 
         # Get persistent course grades for letter grade and passing status
         course_grades = PersistentCourseGrade.objects.filter(
@@ -116,13 +119,15 @@ class LeaderboardTabView(RetrieveAPIView):
         # Calculate completion percentage for all users
         completion_data = []
         for user in all_users:
-            completion_summary = get_course_blocks_completion_summary(course_key, user)
+            completion_summary = get_course_blocks_completion_summary(
+                course_key, user)
             complete_count = completion_summary.get('complete_count', 0)
             incomplete_count = completion_summary.get('incomplete_count', 0)
             locked_count = completion_summary.get('locked_count', 0)
             total_units = complete_count + incomplete_count + locked_count
 
-            completion_percent = (complete_count / total_units * 100) if total_units > 0 else 0.0
+            completion_percent = (
+                complete_count / total_units * 100) if total_units > 0 else 0.0
 
             # Get grade info for letter grade and passing status
             grade = grades_dict.get(user.id)
@@ -144,7 +149,8 @@ class LeaderboardTabView(RetrieveAPIView):
             })
 
         # Sort by completion percentage (highest first), then by username for ties
-        completion_data.sort(key=lambda x: (-x['completion_percent'], x['username']))
+        completion_data.sort(
+            key=lambda x: (-x['completion_percent'], x['username']))
 
         # Build leaderboard with ranking
         leaderboard_data = []
@@ -162,7 +168,8 @@ class LeaderboardTabView(RetrieveAPIView):
                 'user_id': entry['user_id'],
                 'username': entry['username'],
                 'display_name': entry['display_name'],
-                'grade_percent': entry['completion_percent'],  # Using completion_percent in grade_percent field
+                # Using completion_percent in grade_percent field
+                'grade_percent': entry['completion_percent'],
                 'letter_grade': entry['letter_grade'],
                 'is_passing': entry['is_passing'],
                 'is_current_user': entry['is_current_user'],
@@ -183,15 +190,19 @@ class LeaderboardTabView(RetrieveAPIView):
         import logging
         log = logging.getLogger(__name__)
         log.info(f"[Leaderboard] Request user ID: {request.user.id}")
-        log.info(f"[Leaderboard] Total enrolled users: {len(enrolled_user_ids)}")
+        log.info(
+            f"[Leaderboard] Total enrolled users: {len(enrolled_user_ids)}")
         log.info(f"[Leaderboard] Users with grades: {len(grades_dict)}")
         log.info(f"[Leaderboard] Total in leaderboard: {total_students}")
-        log.info(f"[Leaderboard] Current user found: {current_user_entry is not None}")
+        log.info(
+            f"[Leaderboard] Current user found: {current_user_entry is not None}")
         if current_user_entry:
-            log.info(f"[Leaderboard] Current user rank: {current_user_entry['rank']}, completion: {current_user_entry['grade_percent']}%")
+            log.info(
+                f"[Leaderboard] Current user rank: {current_user_entry['rank']}, completion: {current_user_entry['grade_percent']}%")
 
         if current_user_entry:
-            percentile = ((total_students - current_user_entry['rank']) / total_students * 100) if total_students > 0 else 0
+            percentile = (
+                (total_students - current_user_entry['rank']) / total_students * 100) if total_students > 0 else 0
             current_user_rank_info = {
                 'rank': current_user_entry['rank'],
                 'total_students': total_students,
@@ -199,7 +210,8 @@ class LeaderboardTabView(RetrieveAPIView):
             }
 
         # Get top 3 performers
-        top_performers = leaderboard_data[:3] if len(leaderboard_data) >= 3 else leaderboard_data
+        top_performers = leaderboard_data[:3] if len(
+            leaderboard_data) >= 3 else leaderboard_data
 
         # Prepare response data
         data = {
@@ -280,7 +292,8 @@ class TopGradesView(RetrieveAPIView):
         monitoring_utils.set_custom_attribute('user_id', request.user.id)
 
         # Check if user has access to course
-        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+        course = get_course_or_403(
+            request.user, 'load', course_key, check_if_enrolled=False)
 
         # Check if user is enrolled in the course
         enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
@@ -294,24 +307,36 @@ class TopGradesView(RetrieveAPIView):
             course_id=course_key,
             is_active=True
         )
-        enrolled_user_ids = list(active_enrollments.values_list('user_id', flat=True))
+        enrolled_user_ids = list(
+            active_enrollments.values_list('user_id', flat=True))
 
         # Get persistent course grades - this is the actual grade data
+        # Note: PersistentCourseGrade.user_id is IntegerField, not ForeignKey
         course_grades = PersistentCourseGrade.objects.filter(
             course_id=course_key,
             user_id__in=enrolled_user_ids
-        ).select_related('user')
+        )
+
+        # Get all users with their profiles for display names
+        graded_user_ids = [grade.user_id for grade in course_grades]
+        users = User.objects.filter(
+            id__in=graded_user_ids).select_related('profile')
+        users_dict = {user.id: user for user in users}
 
         # Build grades data
         grades_data = []
         for grade in course_grades:
-            user = grade.user
+            user = users_dict.get(grade.user_id)
+            if not user:
+                continue
+
             try:
                 display_name = user.profile.name if user.profile.name else user.username
-            except:
+            except Exception:
                 display_name = user.username
 
-            grade_percent = round(grade.percent_grade * 100, 2) if grade.percent_grade else 0.0
+            grade_percent = round(grade.percent_grade *
+                                  100, 2) if grade.percent_grade else 0.0
 
             grades_data.append({
                 'user_id': user.id,
@@ -346,7 +371,8 @@ class TopGradesView(RetrieveAPIView):
         # Calculate summary statistics
         all_grades = [g['grade_percentage'] for g in grades_data]
         total_students = len(all_grades)
-        avg_grade = round(sum(all_grades) / total_students, 2) if total_students > 0 else 0
+        avg_grade = round(sum(all_grades) / total_students,
+                          2) if total_students > 0 else 0
         max_grade = max(all_grades) if all_grades else 0
         min_grade = min(all_grades) if all_grades else 0
 
@@ -436,7 +462,8 @@ class TopProgressView(RetrieveAPIView):
         monitoring_utils.set_custom_attribute('user_id', request.user.id)
 
         # Check if user has access to course
-        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+        course = get_course_or_403(
+            request.user, 'load', course_key, check_if_enrolled=False)
 
         # Check if user is enrolled in the course
         enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
@@ -461,19 +488,23 @@ class TopProgressView(RetrieveAPIView):
             enrollments_qs = enrollments_qs.filter(created__gte=start_date)
         # 'all' means no date filter
 
-        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
-        all_users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+        enrolled_user_ids = list(
+            enrollments_qs.values_list('user_id', flat=True))
+        all_users = User.objects.filter(
+            id__in=enrolled_user_ids).select_related('profile')
 
         # Calculate completion percentage for all users
         progress_data = []
         for user in all_users:
-            completion_summary = get_course_blocks_completion_summary(course_key, user)
+            completion_summary = get_course_blocks_completion_summary(
+                course_key, user)
             complete_count = completion_summary.get('complete_count', 0)
             incomplete_count = completion_summary.get('incomplete_count', 0)
             locked_count = completion_summary.get('locked_count', 0)
             total_units = complete_count + incomplete_count + locked_count
 
-            completion_percent = round((complete_count / total_units * 100), 2) if total_units > 0 else 0.0
+            completion_percent = round(
+                (complete_count / total_units * 100), 2) if total_units > 0 else 0.0
 
             try:
                 display_name = user.profile.name if user.profile.name else user.username
@@ -489,7 +520,8 @@ class TopProgressView(RetrieveAPIView):
             })
 
         # Sort by progress percentage (highest first), then by username for ties
-        progress_data.sort(key=lambda x: (-x['progress_percent'], x['username']))
+        progress_data.sort(
+            key=lambda x: (-x['progress_percent'], x['username']))
 
         # Calculate ranks with tie handling
         top_students = []
@@ -509,7 +541,8 @@ class TopProgressView(RetrieveAPIView):
         # Calculate summary statistics
         all_progress = [p['progress_percent'] for p in progress_data]
         total_students = len(all_progress)
-        avg_progress = round(sum(all_progress) / total_students, 2) if total_students > 0 else 0
+        avg_progress = round(sum(all_progress) /
+                             total_students, 2) if total_students > 0 else 0
 
         # Limit results
         top_students = top_students[:limit]
