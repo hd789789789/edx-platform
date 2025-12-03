@@ -521,6 +521,12 @@ class TopProgressView(RetrieveAPIView):
             completion_percent = round(
                 (complete_count / total_units * 100), 2) if total_units > 0 else 0.0
 
+            # Debug logging for each user
+            log.info(
+                f"[TopProgress] User {user.username}: complete={complete_count}, "
+                f"incomplete={incomplete_count}, locked={locked_count}, "
+                f"total={total_units}, percent={completion_percent}%")
+
             try:
                 display_name = user.profile.name if user.profile.name else user.username
             except:
