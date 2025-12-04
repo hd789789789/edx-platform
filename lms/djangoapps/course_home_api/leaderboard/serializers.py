@@ -79,6 +79,7 @@ class TopGradesSerializer(ReadOnlySerializer):
     timestamp = serializers.CharField()
     summary = TopGradesSummarySerializer()
     top_students = TopGradesStudentSerializer(many=True)
+    current_user_entry = TopGradesStudentSerializer(allow_null=True, required=False)
 
 
 # ============= Top Progress Serializers =============
@@ -115,3 +116,4 @@ class TopProgressSerializer(ReadOnlySerializer):
     timestamp = serializers.CharField()
     summary = TopProgressSummarySerializer()
     top_students = TopProgressStudentSerializer(many=True)
+    current_user_entry = TopProgressStudentSerializer(allow_null=True, required=False)

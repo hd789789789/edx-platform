@@ -496,21 +496,33 @@ class TopGradesView(RetrieveAPIView):
 
         for idx, entry in enumerate(grades_data):
             # Rank = vị trí trong danh sách đã sort (bắt đầu từ 1)
-            entry_with_rank = {
+            # Clean entry: loại bỏ các field không cần thiết cho API response
+            clean_entry = {
                 'rank': idx + 1,
-                **entry
+                'user_id': entry['user_id'],
+                'username': entry['username'],
+                'full_name': entry['full_name'],
+                'grade_percentage': entry['grade_percentage'],
+                'letter_grade': entry['letter_grade'],
+                'is_passed': entry['is_passed'],
+                'passed_date': entry['passed_date'],
+                'grade_modified': entry['grade_modified'],
+                'is_current_user': entry['is_current_user'],
             }
-            all_students_with_rank.append(entry_with_rank)
+            all_students_with_rank.append(clean_entry)
             
             # Lưu current user entry
             if entry['is_current_user']:
-                current_user_entry = entry_with_rank
+                current_user_entry = clean_entry.copy()
 
         # Limit results cho top_students
         top_students = all_students_with_rank[:limit]
         
         # Kiểm tra xem current user có nằm trong top không
         current_user_in_top = any(s.get('is_current_user') for s in top_students)
+        
+        log.info(f"[TopGrades] current_user_entry: {current_user_entry}")
+        log.info(f"[TopGrades] current_user_in_top: {current_user_in_top}")
 
         # Calculate summary statistics from ALL enrolled students
         # Note: grades are now on scale of 10, so multiply by 10 for percentage display
@@ -782,21 +794,29 @@ class TopProgressView(RetrieveAPIView):
         current_user_entry = None
 
         for idx, entry in enumerate(progress_data):
-            entry_with_rank = {
+            # Clean entry: loại bỏ các field không cần thiết cho API response
+            clean_entry = {
                 'rank': idx + 1,
-                **entry
+                'user_id': entry['user_id'],
+                'username': entry['username'],
+                'full_name': entry['full_name'],
+                'progress_percent': entry['progress_percent'],
+                'is_current_user': entry['is_current_user'],
             }
-            all_students_with_rank.append(entry_with_rank)
+            all_students_with_rank.append(clean_entry)
             
             # Lưu current user entry
             if entry['is_current_user']:
-                current_user_entry = entry_with_rank
+                current_user_entry = clean_entry.copy()
 
         # Limit results cho top_students
         top_students = all_students_with_rank[:limit]
         
         # Kiểm tra xem current user có nằm trong top không
         current_user_in_top = any(s.get('is_current_user') for s in top_students)
+        
+        log.info(f"[TopProgress] current_user_entry: {current_user_entry}")
+        log.info(f"[TopProgress] current_user_in_top: {current_user_in_top}")
 
         # Calculate summary statistics
         all_progress = [p['progress_percent'] for p in progress_data]
