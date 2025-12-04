@@ -100,7 +100,10 @@ class BadgeView(RetrieveAPIView):
         Get the course structure with chapters, sections (sequences), and units (verticals)
         """
         try:
-            blocks = get_blocks(
+            # get_blocks returns a dict with 'blocks' and 'root' keys
+            # blocks is a dict mapping block_id -> block_data
+            # root is the block_id of the root course block
+            blocks_response = get_blocks(
                 request=None,
                 usage_key=course.location,
                 user=user,
@@ -113,9 +116,22 @@ class BadgeView(RetrieveAPIView):
                 ],
                 block_types_filter=['course', 'chapter', 'sequential', 'vertical'],
             )
-            return blocks
+            
+            if not isinstance(blocks_response, dict):
+                log.error(f"[Badge] get_blocks returned unexpected type: {type(blocks_response)}")
+                return {'blocks': {}, 'root': None}
+            
+            blocks = blocks_response.get('blocks', {})
+            root = blocks_response.get('root')
+            
+            if not root or root not in blocks:
+                log.warning(f"[Badge] Root block not found. Root ID: {root}, Blocks count: {len(blocks)}")
+                return {'blocks': {}, 'root': None}
+            
+            log.info(f"[Badge] Successfully loaded {len(blocks)} blocks, root: {root}")
+            return {'blocks': blocks, 'root': root}
         except Exception as e:
-            log.error(f"[Badge] Error getting course structure: {e}")
+            log.error(f"[Badge] Error getting course structure: {e}", exc_info=True)
             return {'blocks': {}, 'root': None}
 
     def _get_user_completions(self, user, course_key):
@@ -128,8 +144,22 @@ class BadgeView(RetrieveAPIView):
             completion=1.0
         ).values_list('block_key', 'modified')
         
-        # Convert to dict with block_key -> completion_time
-        return {str(block_key): modified for block_key, modified in completions}
+        # Convert to dict with block_key (as string) -> completion_time
+        # Use both string and UsageKey format for matching
+        completion_dict = {}
+        for block_key, modified in completions:
+            # Store with string format
+            completion_dict[str(block_key)] = modified
+            # Also store with UsageKey format for matching
+            try:
+                from opaque_keys.edx.keys import UsageKey
+                usage_key = UsageKey.from_string(str(block_key))
+                completion_dict[str(usage_key)] = modified
+            except Exception:
+                pass
+        
+        log.info(f"[Badge] Found {len(completion_dict)} completion records for user {user.id}")
+        return completion_dict
 
     def _build_badge_data(self, blocks_data, completions, course):
         """
@@ -287,16 +317,18 @@ class BadgeView(RetrieveAPIView):
         Build unit badge data
         """
         # Check if unit is completed
-        is_completed = unit_id in completions
+        # unit_id might be a string or UsageKey object, try both formats
+        unit_id_str = str(unit_id)
+        is_completed = unit_id_str in completions
         completed_at = None
         
         if is_completed:
-            completion_time = completions.get(unit_id)
+            completion_time = completions.get(unit_id_str)
             if completion_time:
                 completed_at = completion_time.isoformat() if hasattr(completion_time, 'isoformat') else str(completion_time)
         
         return {
-            'unit_id': unit_id,
+            'unit_id': unit_id_str,
             'unit_name': unit_block.get('display_name', 'Untitled Unit'),
             'is_completed': is_completed,
             'completed_at': completed_at,
