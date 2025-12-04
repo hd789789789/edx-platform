@@ -119,6 +119,7 @@ class BadgeView(RetrieveAPIView):
                     'type',
                     'children',
                     'completion',
+                    'complete',  # Add complete field for completion status
                 ],
                 block_types_filter=['course', 'chapter', 'sequential', 'vertical'],
             )
@@ -150,27 +151,36 @@ class BadgeView(RetrieveAPIView):
         """
         Get all block completions for user in this course
         """
+        from opaque_keys.edx.keys import UsageKey
+        
         completions = BlockCompletion.objects.filter(
             user=user,
             context_key=course_key,
             completion=1.0
         ).values_list('block_key', 'modified')
         
-        # Convert to dict with block_key (as string) -> completion_time
-        # Use both string and UsageKey format for matching
+        # Convert to dict with normalized block_key (as string) -> completion_time
+        # Normalize all keys to string format for consistent matching
         completion_dict = {}
         for block_key, modified in completions:
-            # Store with string format
-            completion_dict[str(block_key)] = modified
-            # Also store with UsageKey format for matching
+            # Normalize block_key to string
+            block_key_str = str(block_key)
+            completion_dict[block_key_str] = modified
+            
+            # Also try to normalize using UsageKey to handle different formats
             try:
-                from opaque_keys.edx.keys import UsageKey
-                usage_key = UsageKey.from_string(str(block_key))
+                usage_key = UsageKey.from_string(block_key_str)
+                # Store with both original string and normalized UsageKey string
                 completion_dict[str(usage_key)] = modified
             except Exception:
                 pass
         
-        log.info(f"[Badge] Found {len(completion_dict)} completion records for user {user.id}")
+        log.info(f"[Badge] Found {len(completions)} completion records for user {user.id}, normalized to {len(completion_dict)} keys")
+        if len(completion_dict) > 0:
+            # Log first few keys for debugging
+            sample_keys = list(completion_dict.keys())[:3]
+            log.info(f"[Badge] Sample completion keys: {sample_keys}")
+        
         return completion_dict
 
     def _build_badge_data(self, blocks_data, completions, course):
@@ -328,16 +338,50 @@ class BadgeView(RetrieveAPIView):
         """
         Build unit badge data
         """
-        # Check if unit is completed
-        # unit_id might be a string or UsageKey object, try both formats
+        from opaque_keys.edx.keys import UsageKey
+        
+        # Normalize unit_id to string format for matching
         unit_id_str = str(unit_id)
-        is_completed = unit_id_str in completions
+        
+        # First, try to get completion from block data itself (if get_blocks provided it)
+        # Block may have 'complete' field (boolean) or 'completion' field
+        is_completed = unit_block.get('complete', False)
         completed_at = None
         
-        if is_completed:
-            completion_time = completions.get(unit_id_str)
-            if completion_time:
-                completed_at = completion_time.isoformat() if hasattr(completion_time, 'isoformat') else str(completion_time)
+        # If block doesn't have completion info, check BlockCompletion table
+        if not is_completed:
+            # Try multiple formats to match with completions
+            # First try direct string match
+            if unit_id_str in completions:
+                is_completed = True
+                completed_at = completions.get(unit_id_str)
+            else:
+                # Try to normalize using UsageKey and match again
+                try:
+                    usage_key = UsageKey.from_string(unit_id_str)
+                    normalized_key = str(usage_key)
+                    if normalized_key in completions:
+                        is_completed = True
+                        completed_at = completions.get(normalized_key)
+                except Exception:
+                    pass
+        
+        # If we got completion from block data but no time, try to get from completions dict
+        if is_completed and not completed_at:
+            if unit_id_str in completions:
+                completed_at = completions.get(unit_id_str)
+            else:
+                try:
+                    usage_key = UsageKey.from_string(unit_id_str)
+                    normalized_key = str(usage_key)
+                    if normalized_key in completions:
+                        completed_at = completions.get(normalized_key)
+                except Exception:
+                    pass
+        
+        # Format completion time
+        if completed_at:
+            completed_at = completed_at.isoformat() if hasattr(completed_at, 'isoformat') else str(completed_at)
         
         return {
             'unit_id': unit_id_str,
