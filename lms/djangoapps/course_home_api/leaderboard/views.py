@@ -306,9 +306,12 @@ class TopGradesView(RetrieveAPIView):
         active_enrollments = CourseEnrollment.objects.filter(
             course_id=course_key,
             is_active=True
-        )
+        ).select_related('user')
         enrolled_user_ids = list(
             active_enrollments.values_list('user_id', flat=True))
+        
+        # Tạo dict để map user_id -> enrollment created timestamp (dùng cho tie-breaking)
+        enrollment_dict = {e.user_id: e.created for e in active_enrollments}
 
         import logging
         log = logging.getLogger(__name__)
@@ -356,6 +359,13 @@ class TopGradesView(RetrieveAPIView):
                 grade_modified = None
                 grade_time = None
 
+            # Tie-breaking: nếu grade_time là None, dùng enrollment created hoặc user date_joined
+            tie_breaker_time = grade_time
+            if not tie_breaker_time:
+                tie_breaker_time = enrollment_dict.get(user.id)
+            if not tie_breaker_time:
+                tie_breaker_time = user.date_joined
+
             grades_data.append({
                 'user_id': user.id,
                 'username': user.username,
@@ -365,15 +375,16 @@ class TopGradesView(RetrieveAPIView):
                 'is_passed': is_passed,
                 'passed_date': passed_date,
                 'grade_modified': grade_modified,
-                'grade_time': grade_time,  # Dùng để sort tie-breaking
+                'grade_time': grade_time,  # Dùng để hiển thị
+                'tie_breaker_time': tie_breaker_time,  # Dùng để sort tie-breaking
                 'is_current_user': user.id == request.user.id,
             })
 
         # Sort by grade percentage (highest first), then by time achieved (earlier = better rank)
-        # grade_time None sẽ được xếp cuối cùng
+        # Dùng tie_breaker_time để đảm bảo luôn có giá trị để sort
         grades_data.sort(key=lambda x: (
             -x['grade_percentage'],
-            x['grade_time'] if x['grade_time'] else timezone.now()
+            x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now()
         ))
 
         # Calculate ranks with tie handling - tính rank cho TẤT CẢ students
