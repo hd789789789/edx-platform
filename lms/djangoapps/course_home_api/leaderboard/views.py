@@ -339,11 +339,14 @@ class TopGradesView(RetrieveAPIView):
 
             # If user has grade record, use it; otherwise show 0%
             if grade:
+                # Quy về thang điểm 10: nhân 10 rồi làm tròn 1 chữ số
                 grade_percent = round(
-                    grade.percent_grade * 100, 2) if grade.percent_grade else 0.0
+                    grade.percent_grade * 10, 1) if grade.percent_grade else 0.0
                 letter_grade = grade.letter_grade or ''
                 is_passed = grade.passed_timestamp is not None
                 passed_date = grade.passed_timestamp.isoformat() if grade.passed_timestamp else None
+                # Lấy thời gian đạt điểm (ưu tiên passed_date, nếu không có thì dùng modified)
+                grade_time = grade.passed_timestamp if grade.passed_timestamp else grade.modified
                 grade_modified = grade.modified.isoformat() if grade.modified else None
             else:
                 grade_percent = 0.0
@@ -351,6 +354,7 @@ class TopGradesView(RetrieveAPIView):
                 is_passed = False
                 passed_date = None
                 grade_modified = None
+                grade_time = None
 
             grades_data.append({
                 'user_id': user.id,
@@ -361,40 +365,60 @@ class TopGradesView(RetrieveAPIView):
                 'is_passed': is_passed,
                 'passed_date': passed_date,
                 'grade_modified': grade_modified,
+                'grade_time': grade_time,  # Dùng để sort tie-breaking
                 'is_current_user': user.id == request.user.id,
             })
 
-        # Sort by grade percentage (highest first), then by username for ties
-        grades_data.sort(key=lambda x: (-x['grade_percentage'], x['username']))
+        # Sort by grade percentage (highest first), then by time achieved (earlier = better rank)
+        # grade_time None sẽ được xếp cuối cùng
+        grades_data.sort(key=lambda x: (
+            -x['grade_percentage'],
+            x['grade_time'] if x['grade_time'] else timezone.now()
+        ))
 
-        # Calculate ranks with tie handling
-        top_students = []
+        # Calculate ranks with tie handling - tính rank cho TẤT CẢ students
+        all_students_with_rank = []
         rank = 1
         prev_grade = None
+        prev_time = None
+        current_user_entry = None
 
         for idx, entry in enumerate(grades_data):
+            # Tính rank: nếu điểm thấp hơn → rank mới
+            # Nếu điểm bằng nhau, rank giữ nguyên (vì đã sort theo thời gian)
             if prev_grade is not None and entry['grade_percentage'] < prev_grade:
                 rank = idx + 1
 
-            top_students.append({
+            entry_with_rank = {
                 'rank': rank,
                 **entry
-            })
+            }
+            all_students_with_rank.append(entry_with_rank)
+            
+            # Lưu current user entry
+            if entry['is_current_user']:
+                current_user_entry = entry_with_rank
+            
             prev_grade = entry['grade_percentage']
+            prev_time = entry['grade_time']
+
+        # Limit results cho top_students
+        top_students = all_students_with_rank[:limit]
+        
+        # Kiểm tra xem current user có nằm trong top không
+        current_user_in_top = any(s.get('is_current_user') for s in top_students)
 
         # Calculate summary statistics from ALL enrolled students
+        # Note: grades are now on scale of 10, so multiply by 10 for percentage display
         all_grades = [g['grade_percentage'] for g in grades_data]
         # Total enrolled, not just those with grades
         total_students = len(enrolled_user_ids)
         avg_grade = round(sum(all_grades) / len(all_grades),
-                          2) if all_grades else 0
+                          1) if all_grades else 0
         max_grade = max(all_grades) if all_grades else 0
         min_grade = min(all_grades) if all_grades else 0
         log.info(
             f"[TopGrades] Stats - total: {total_students}, avg: {avg_grade}, max: {max_grade}")
-
-        # Limit results
-        top_students = top_students[:limit]
 
         data = {
             'success': True,
@@ -409,6 +433,7 @@ class TopGradesView(RetrieveAPIView):
                 'top_count': len(top_students),
             },
             'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
         }
 
         serializer = self.get_serializer_class()(data)
