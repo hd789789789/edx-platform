@@ -520,10 +520,13 @@ class TopProgressView(RetrieveAPIView):
         enrollments_qs = CourseEnrollment.objects.filter(
             course_id=course_key,
             is_active=True
-        )
+        ).select_related('user')
 
         # Note: period filter will be used for display purposes only
         # All enrolled users are always included in the leaderboard
+        
+        # Tạo dict để map user_id -> enrollment created timestamp (dùng cho tie-breaking)
+        enrollment_dict = {e.user_id: e.created for e in enrollments_qs}
 
         enrolled_user_ids = list(
             enrollments_qs.values_list('user_id', flat=True))
@@ -559,41 +562,53 @@ class TopProgressView(RetrieveAPIView):
             except:
                 display_name = user.username
 
+            # Tie-breaking: dùng enrollment created hoặc user date_joined
+            tie_breaker_time = enrollment_dict.get(user.id)
+            if not tie_breaker_time:
+                tie_breaker_time = user.date_joined
+
             progress_data.append({
                 'user_id': user.id,
                 'username': user.username,
                 'full_name': display_name,
                 'progress_percent': completion_percent,
+                'tie_breaker_time': tie_breaker_time,  # Dùng để sort tie-breaking
                 'is_current_user': user.id == request.user.id,
             })
 
-        # Sort by progress percentage (highest first), then by username for ties
+        # Sort by progress percentage (highest first), then by time enrolled (earlier = better rank)
         progress_data.sort(
-            key=lambda x: (-x['progress_percent'], x['username']))
+            key=lambda x: (
+                -x['progress_percent'],
+                x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now()
+            ))
 
-        # Calculate ranks with tie handling
-        top_students = []
-        rank = 1
-        prev_progress = None
+        # Calculate ranks - KHÔNG có đồng hạng, mỗi người một rank riêng
+        all_students_with_rank = []
+        current_user_entry = None
 
         for idx, entry in enumerate(progress_data):
-            if prev_progress is not None and entry['progress_percent'] < prev_progress:
-                rank = idx + 1
-
-            top_students.append({
-                'rank': rank,
+            entry_with_rank = {
+                'rank': idx + 1,
                 **entry
-            })
-            prev_progress = entry['progress_percent']
+            }
+            all_students_with_rank.append(entry_with_rank)
+            
+            # Lưu current user entry
+            if entry['is_current_user']:
+                current_user_entry = entry_with_rank
+
+        # Limit results cho top_students
+        top_students = all_students_with_rank[:limit]
+        
+        # Kiểm tra xem current user có nằm trong top không
+        current_user_in_top = any(s.get('is_current_user') for s in top_students)
 
         # Calculate summary statistics
         all_progress = [p['progress_percent'] for p in progress_data]
         total_students = len(all_progress)
         avg_progress = round(sum(all_progress) /
                              total_students, 2) if total_students > 0 else 0
-
-        # Limit results
-        top_students = top_students[:limit]
 
         data = {
             'success': True,
@@ -607,6 +622,7 @@ class TopProgressView(RetrieveAPIView):
                 'top_count': len(top_students),
             },
             'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
         }
 
         serializer = self.get_serializer_class()(data)
