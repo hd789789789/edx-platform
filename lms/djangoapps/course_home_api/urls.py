@@ -20,6 +20,7 @@ from lms.djangoapps.course_home_api.leaderboard.views import (
     LeaderboardTabView,
     TopGradesView,
     TopProgressView,
+    TopStreakView,
 )
 from lms.djangoapps.course_home_api.badge.views import BadgeView
 
