@@ -21,6 +21,7 @@ from lms.djangoapps.course_home_api.leaderboard.views import (
     TopGradesView,
     TopProgressView,
 )
+from lms.djangoapps.course_home_api.badge.views import BadgeView
 
 # This API is a BFF ("backend for frontend") designed for the learning MFE. It's not versioned because there is no
 # guarantee of stability over time. It may change from one Open edX release to another. Don't write any scripts
@@ -113,5 +114,14 @@ urlpatterns += [
         fr'^leaderboard/{settings.COURSE_KEY_PATTERN}$',
         LeaderboardTabView.as_view(),
         name='leaderboard-tab'
+    ),
+]
+
+# Badge Tab URLs
+urlpatterns += [
+    re_path(
+        fr'^badge/{settings.COURSE_KEY_PATTERN}$',
+        BadgeView.as_view(),
+        name='badge-tab'
     ),
 ]
