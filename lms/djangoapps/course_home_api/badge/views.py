@@ -20,6 +20,7 @@ from lms.djangoapps.courseware.courses import get_course_with_access
 from openedx.core.djangoapps.content.block_structure.api import get_block_structure_manager
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
 from completion.models import BlockCompletion
+from xmodule.modulestore.django import modulestore
 
 from .serializers import BadgeResponseSerializer
 
@@ -98,16 +99,21 @@ class BadgeView(RetrieveAPIView):
     def _get_course_structure(self, user, course_key, course):
         """
         Get the course structure with chapters, sections (sequences), and units (verticals)
+        Similar to get_course_outline_block_tree but simplified for badge data
         """
         try:
+            # Create course usage key similar to get_course_outline_block_tree
+            course_usage_key = modulestore().make_course_usage_key(course_key)
+            
             # get_blocks returns a dict with 'blocks' and 'root' keys
             # blocks is a dict mapping block_id -> block_data
             # root is the block_id of the root course block
+            # Note: request is required, use self.request from the view
             blocks_response = get_blocks(
-                request=None,
-                usage_key=course.location,
+                request=self.request,
+                usage_key=course_usage_key,
                 user=user,
-                depth='all',
+                nav_depth=3,  # Use nav_depth instead of depth='all'
                 requested_fields=[
                     'display_name',
                     'type',
@@ -124,8 +130,14 @@ class BadgeView(RetrieveAPIView):
             blocks = blocks_response.get('blocks', {})
             root = blocks_response.get('root')
             
-            if not root or root not in blocks:
-                log.warning(f"[Badge] Root block not found. Root ID: {root}, Blocks count: {len(blocks)}")
+            log.info(f"[Badge] get_blocks returned {len(blocks)} blocks, root: {root}")
+            
+            if not root:
+                log.warning(f"[Badge] No root block found in response")
+                return {'blocks': {}, 'root': None}
+            
+            if root not in blocks:
+                log.warning(f"[Badge] Root block ID '{root}' not found in blocks dict. Available block IDs: {list(blocks.keys())[:5]}...")
                 return {'blocks': {}, 'root': None}
             
             log.info(f"[Badge] Successfully loaded {len(blocks)} blocks, root: {root}")
