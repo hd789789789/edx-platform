@@ -387,21 +387,15 @@ class TopGradesView(RetrieveAPIView):
             x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now()
         ))
 
-        # Calculate ranks with tie handling - tính rank cho TẤT CẢ students
+        # Calculate ranks - KHÔNG có đồng hạng vì đã sort theo tie_breaker_time
+        # Mỗi người một rank riêng: ai đạt điểm trước (hoặc enroll trước) thì xếp trên
         all_students_with_rank = []
-        rank = 1
-        prev_grade = None
-        prev_time = None
         current_user_entry = None
 
         for idx, entry in enumerate(grades_data):
-            # Tính rank: nếu điểm thấp hơn → rank mới
-            # Nếu điểm bằng nhau, rank giữ nguyên (vì đã sort theo thời gian)
-            if prev_grade is not None and entry['grade_percentage'] < prev_grade:
-                rank = idx + 1
-
+            # Rank = vị trí trong danh sách đã sort (bắt đầu từ 1)
             entry_with_rank = {
-                'rank': rank,
+                'rank': idx + 1,
                 **entry
             }
             all_students_with_rank.append(entry_with_rank)
@@ -409,9 +403,6 @@ class TopGradesView(RetrieveAPIView):
             # Lưu current user entry
             if entry['is_current_user']:
                 current_user_entry = entry_with_rank
-            
-            prev_grade = entry['grade_percentage']
-            prev_time = entry['grade_time']
 
         # Limit results cho top_students
         top_students = all_students_with_rank[:limit]
