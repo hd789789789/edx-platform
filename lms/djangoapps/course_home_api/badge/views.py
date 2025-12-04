@@ -150,28 +150,38 @@ class BadgeView(RetrieveAPIView):
     def _get_user_completions(self, user, course_key):
         """
         Get all block completions for user in this course
+        Similar to Outline API's completions_dict but also includes completion_time
+        Returns: dict with block_key (str) -> {'completion': float, 'modified': datetime}
         """
         from opaque_keys.edx.keys import UsageKey
         
+        # Get ALL completions (not just completion=1.0) to match Outline API behavior
+        # Outline API considers a block complete if completion > 0
         completions = BlockCompletion.objects.filter(
             user=user,
-            context_key=course_key,
-            completion=1.0
-        ).values_list('block_key', 'modified')
+            context_key=course_key
+        ).values_list('block_key', 'completion', 'modified')
         
-        # Convert to dict with normalized block_key (as string) -> completion_time
+        # Convert to dict with normalized block_key (as string) -> {'completion': float, 'modified': datetime}
         # Normalize all keys to string format for consistent matching
         completion_dict = {}
-        for block_key, modified in completions:
+        for block_key, completion_value, modified in completions:
             # Normalize block_key to string
             block_key_str = str(block_key)
-            completion_dict[block_key_str] = modified
+            completion_dict[block_key_str] = {
+                'completion': completion_value,
+                'modified': modified
+            }
             
             # Also try to normalize using UsageKey to handle different formats
             try:
                 usage_key = UsageKey.from_string(block_key_str)
-                # Store with both original string and normalized UsageKey string
-                completion_dict[str(usage_key)] = modified
+                normalized_key = str(usage_key)
+                if normalized_key != block_key_str:
+                    completion_dict[normalized_key] = {
+                        'completion': completion_value,
+                        'modified': modified
+                    }
             except Exception:
                 pass
         
@@ -276,12 +286,12 @@ class BadgeView(RetrieveAPIView):
             
             if section_data['is_completed']:
                 completed_sections_count += 1
-                # Track latest completion time
+                # Track latest completion time (ISO format strings can be compared lexicographically)
                 if section_data['completed_at']:
-                    section_time = section_data['completed_at']
-                    if chapter_completed_at is None or section_time > chapter_completed_at:
-                        chapter_completed_at = section_time
+                    if chapter_completed_at is None or section_data['completed_at'] > chapter_completed_at:
+                        chapter_completed_at = section_data['completed_at']
 
+        # Chapter is complete if it has sections AND all sections are complete (matches Outline API)
         is_completed = len(sections) > 0 and completed_sections_count == len(sections)
         
         return {
@@ -297,6 +307,7 @@ class BadgeView(RetrieveAPIView):
     def _build_section_data(self, section_id, section_block, blocks, completions):
         """
         Build section (Bài) badge data with nested units
+        Matches Outline API logic: section is complete if ALL units are complete
         """
         unit_ids = section_block.get('children', [])
         units = []
@@ -316,12 +327,12 @@ class BadgeView(RetrieveAPIView):
             
             if unit_data['is_completed']:
                 completed_units_count += 1
-                # Track latest completion time
+                # Track latest completion time (ISO format strings can be compared lexicographically)
                 if unit_data['completed_at']:
-                    unit_time = unit_data['completed_at']
-                    if section_completed_at is None or unit_time > section_completed_at:
-                        section_completed_at = unit_time
+                    if section_completed_at is None or unit_data['completed_at'] > section_completed_at:
+                        section_completed_at = unit_data['completed_at']
 
+        # Section is complete if it has units AND all units are complete (matches Outline API)
         is_completed = len(units) > 0 and completed_units_count == len(units)
         
         return {
@@ -337,6 +348,7 @@ class BadgeView(RetrieveAPIView):
     def _build_unit_data(self, unit_id, unit_block, completions):
         """
         Build unit badge data
+        Matches Outline API logic: unit is complete if completion > 0
         """
         from opaque_keys.edx.keys import UsageKey
         
@@ -347,37 +359,31 @@ class BadgeView(RetrieveAPIView):
         # Block may have 'complete' field (boolean) or 'completion' field
         is_completed = unit_block.get('complete', False)
         completed_at = None
+        completion_value = 0.0
         
-        # If block doesn't have completion info, check BlockCompletion table
-        if not is_completed:
-            # Try multiple formats to match with completions
-            # First try direct string match
-            if unit_id_str in completions:
-                is_completed = True
-                completed_at = completions.get(unit_id_str)
-            else:
-                # Try to normalize using UsageKey and match again
-                try:
-                    usage_key = UsageKey.from_string(unit_id_str)
-                    normalized_key = str(usage_key)
-                    if normalized_key in completions:
-                        is_completed = True
-                        completed_at = completions.get(normalized_key)
-                except Exception:
-                    pass
+        # Get completion from completions dict (matches Outline API logic)
+        completion_info = None
+        if unit_id_str in completions:
+            completion_info = completions[unit_id_str]
+        else:
+            # Try to normalize using UsageKey and match again
+            try:
+                usage_key = UsageKey.from_string(unit_id_str)
+                normalized_key = str(usage_key)
+                if normalized_key in completions:
+                    completion_info = completions[normalized_key]
+            except Exception:
+                pass
         
-        # If we got completion from block data but no time, try to get from completions dict
-        if is_completed and not completed_at:
-            if unit_id_str in completions:
-                completed_at = completions.get(unit_id_str)
-            else:
-                try:
-                    usage_key = UsageKey.from_string(unit_id_str)
-                    normalized_key = str(usage_key)
-                    if normalized_key in completions:
-                        completed_at = completions.get(normalized_key)
-                except Exception:
-                    pass
+        if completion_info:
+            completion_value = completion_info.get('completion', 0.0)
+            # Unit is complete if completion > 0 (matches Outline API)
+            is_completed = completion_value > 0
+            completed_at = completion_info.get('modified')
+        
+        # If block data says complete but we don't have completion info, trust block data
+        if unit_block.get('complete', False) and not completion_info:
+            is_completed = True
         
         # Format completion time
         if completed_at:
