@@ -79,7 +79,8 @@ class TopGradesSerializer(ReadOnlySerializer):
     timestamp = serializers.CharField()
     summary = TopGradesSummarySerializer()
     top_students = TopGradesStudentSerializer(many=True)
-    current_user_entry = TopGradesStudentSerializer(allow_null=True, required=False)
+    current_user_entry = TopGradesStudentSerializer(
+        allow_null=True, required=False)
 
 
 # ============= Top Progress Serializers =============
@@ -116,4 +117,45 @@ class TopProgressSerializer(ReadOnlySerializer):
     timestamp = serializers.CharField()
     summary = TopProgressSummarySerializer()
     top_students = TopProgressStudentSerializer(many=True)
-    current_user_entry = TopProgressStudentSerializer(allow_null=True, required=False)
+    current_user_entry = TopProgressStudentSerializer(
+        allow_null=True, required=False)
+
+
+# ============= Top Streak Serializers =============
+
+class TopStreakStudentSerializer(ReadOnlySerializer):
+    """
+    Serializer cho từng học viên trong bảng xếp hạng streak
+    """
+    rank = serializers.IntegerField()
+    user_id = serializers.IntegerField()
+    username = serializers.CharField()
+    full_name = serializers.CharField()
+    current_streak = serializers.IntegerField()
+    longest_ever_streak = serializers.IntegerField()
+    is_current_user = serializers.BooleanField()
+
+
+class TopStreakSummarySerializer(ReadOnlySerializer):
+    """
+    Thống kê tổng quan cho leaderboard streak
+    """
+    total_students_with_streak = serializers.IntegerField()
+    avg_streak = serializers.FloatField()
+    max_streak = serializers.IntegerField()
+    top_count = serializers.IntegerField()
+
+
+class TopStreakSerializer(ReadOnlySerializer):
+    """
+    Serializer cho API Top Streak
+    """
+    success = serializers.BooleanField()
+    course_id = serializers.CharField()
+    leaderboard_type = serializers.CharField()
+    mode = serializers.CharField()  # 'current' hoặc 'best'
+    timestamp = serializers.CharField()
+    summary = TopStreakSummarySerializer()
+    top_students = TopStreakStudentSerializer(many=True)
+    current_user_entry = TopStreakStudentSerializer(
+        allow_null=True, required=False)

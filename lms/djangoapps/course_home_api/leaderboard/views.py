@@ -15,11 +15,12 @@ from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from common.djangoapps.student.models import CourseEnrollment
+from common.djangoapps.student.models import CourseEnrollment, UserCelebration
 from lms.djangoapps.course_home_api.leaderboard.serializers import (
     LeaderboardTabSerializer,
     TopGradesSerializer,
     TopProgressSerializer,
+    TopStreakSerializer,
 )
 from lms.djangoapps.course_home_api.utils import get_course_or_403
 from lms.djangoapps.courseware.access import has_access
@@ -280,7 +281,7 @@ class TopGradesView(RetrieveAPIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = TopGradesSerializer
 
-    def _generate_mock_data(self, request, limit, course_key_string):
+    def _generate_mock_data(self, request, limit, course_key_string, mode):
         """Generate mock test data for leaderboard testing"""
         import random
         
@@ -833,6 +834,273 @@ class TopProgressView(RetrieveAPIView):
             'summary': {
                 'total_students_with_progress': total_students,
                 'avg_progress': avg_progress,
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
+        }
+
+        serializer = self.get_serializer_class()(data)
+        return Response(serializer.data)
+
+
+class TopStreakView(RetrieveAPIView):
+    """
+    Bảng xếp hạng streak (số ngày học liên tục) cho một khoá học.
+
+    Ví dụ:
+        GET api/course_home/top-streak/{course_key}?limit=10
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (IsAuthenticated,)
+    serializer_class = TopStreakSerializer
+
+    def _generate_mock_data(self, request, limit, course_key_string):
+        """
+        Sinh dữ liệu mock để test leaderboard streak (không đụng DB thực).
+        """
+        import random
+
+        first_names = ['An', 'Bình', 'Cường', 'Dũng', 'Đức', 'Giang', 'Hà', 'Hải', 'Hiếu', 'Hoàng',
+                       'Hùng', 'Hương', 'Khang', 'Khánh', 'Kiên', 'Lan', 'Linh', 'Long', 'Mai', 'Minh',
+                       'Nam', 'Nga', 'Ngọc', 'Nhân', 'Như', 'Phong', 'Phúc', 'Quang', 'Quốc', 'Sơn',
+                       'Tâm', 'Thảo', 'Thành', 'Thiên', 'Thịnh', 'Thu', 'Thủy', 'Tiến', 'Trang', 'Trí',
+                       'Trung', 'Tú', 'Tuấn', 'Uyên', 'Văn', 'Việt', 'Vũ', 'Xuân', 'Yến', 'Ý']
+        last_names = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng',
+                      'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý', 'Đinh', 'Lương', 'Trương', 'Cao']
+
+        all_students = []
+        for i in range(1, 101):
+            # current_streak: 0–30 ngày, thiên về thấp
+            streak_type = random.choices(['high', 'medium', 'low', 'zero'], weights=[10, 30, 40, 20])[0]
+            if streak_type == 'high':
+                current_streak = random.randint(10, 30)
+            elif streak_type == 'medium':
+                current_streak = random.randint(5, 10)
+            elif streak_type == 'low':
+                current_streak = random.randint(1, 4)
+            else:
+                current_streak = 0
+
+            longest_ever = max(current_streak, random.randint(current_streak, 40))
+
+            all_students.append({
+                'user_id': 1000 + i,
+                'username': f'testuser_{i:03d}',
+                'full_name': f'{random.choice(last_names)} {random.choice(first_names)}',
+                'current_streak': current_streak,
+                'longest_ever_streak': longest_ever,
+                'is_current_user': False,
+            })
+
+        # Thêm current user
+        current_streak = random.randint(0, 25)
+        longest_ever = max(current_streak, random.randint(current_streak, 35))
+
+        current_user_entry = {
+            'user_id': request.user.id,
+            'username': request.user.username,
+            'full_name': getattr(request.user, 'profile', None) and request.user.profile.name or request.user.username,
+            'current_streak': current_streak,
+            'longest_ever_streak': longest_ever,
+            'is_current_user': True,
+        }
+        all_students.append(current_user_entry)
+
+        # Sort tuỳ theo mode
+        if mode == 'best':
+            # Xếp theo streak cao nhất từng user
+            all_students.sort(key=lambda x: (-x['longest_ever_streak'], -x['current_streak']))
+        else:
+            # Mặc định: streak hiện tại
+            all_students.sort(key=lambda x: (-x['current_streak'], -x['longest_ever_streak']))
+
+        # Gán rank
+        for idx, s in enumerate(all_students):
+            s['rank'] = idx + 1
+            if s['is_current_user']:
+                current_user_entry = s.copy()
+
+        top_students = all_students[:limit]
+        current_user_in_top = any(s['is_current_user'] for s in top_students)
+
+        # Dùng current_streak để tính thống kê tổng quan
+        streak_values = [s['current_streak'] for s in all_students if s['current_streak'] > 0]
+        total_with_streak = len(streak_values)
+
+        return {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'streak',
+            'mode': mode,
+            'timestamp': timezone.now().isoformat(),
+            'test_mode': True,
+            'summary': {
+                'total_students_with_streak': total_with_streak,
+                'avg_streak': round(sum(streak_values) / total_with_streak, 1) if total_with_streak else 0.0,
+                'max_streak': max(streak_values) if streak_values else 0,
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
+        }
+
+    def get(self, request, *args, **kwargs):
+        course_key_string = kwargs.get('course_key_string')
+        course_key = CourseKey.from_string(course_key_string)
+
+        # Query params
+        limit = int(request.query_params.get('limit', 10))
+        mode = request.query_params.get('mode', 'current')
+        if mode not in ['current', 'best']:
+            mode = 'current'
+        test_mode = request.query_params.get('test', '').lower() == 'true'
+
+        # Test mode
+        if test_mode:
+            data = self._generate_mock_data(request, limit, course_key_string, mode)
+            return Response(data)
+
+        # Tracing
+        monitoring_utils.set_custom_attribute('course_id', course_key_string)
+        monitoring_utils.set_custom_attribute('user_id', request.user.id)
+
+        # Check access
+        course = get_course_or_403(
+            request.user, 'load', course_key, check_if_enrolled=False)
+
+        enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
+        is_staff = bool(has_access(request.user, 'staff', course_key))
+
+        if not ((enrollment and enrollment.is_active) or is_staff):
+            return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
+
+        # Cập nhật streak cho chính user hiện tại (đảm bảo số liệu mới nhất)
+        try:
+            UserCelebration.perform_streak_updates(request.user, course_key)
+        except Exception:
+            # Không để lỗi streak chặn cả API
+            pass
+
+        # Lấy tất cả enrollment active
+        enrollments_qs = CourseEnrollment.objects.filter(
+            course_id=course_key,
+            is_active=True,
+        ).select_related('user')
+
+        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
+        users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+
+        # Map user_id -> UserCelebration
+        celebrations = UserCelebration.objects.filter(
+            user_id__in=enrolled_user_ids
+        )
+        celebration_dict = {c.user_id: c for c in celebrations}
+
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(f"[TopStreak] Total enrolled users: {len(enrolled_user_ids)}")
+        log.info(f"[TopStreak] Users with celebration rows: {len(celebration_dict)}")
+
+        streak_data = []
+        for user in users:
+            celebration = celebration_dict.get(user.id)
+            current_streak = celebration.streak_length if celebration else 0
+            longest_ever = celebration.longest_ever_streak if celebration else 0
+
+            is_current_user = (user.id == request.user.id)
+            if current_streak <= 0 and not is_current_user:
+                # Bảng streak chỉ hiển thị những người đang có streak > 0,
+                # ngoại trừ chính tài khoản đang đăng nhập để vẫn cho họ thấy số ngày hiện tại (kể cả 0).
+                continue
+
+            try:
+                display_name = user.profile.name if user.profile.name else user.username
+            except Exception:
+                display_name = user.username
+
+            streak_data.append({
+                'user_id': user.id,
+                'username': user.username,
+                'full_name': display_name,
+                'current_streak': current_streak,
+                'longest_ever_streak': longest_ever,
+                'is_current_user': is_current_user,
+            })
+
+        # Nếu không ai có streak, trả về rỗng
+        if not streak_data:
+            data = {
+                'success': True,
+                'course_id': course_key_string,
+                'leaderboard_type': 'streak',
+                'timestamp': timezone.now().isoformat(),
+                'summary': {
+                    'total_students_with_streak': 0,
+                    'avg_streak': 0.0,
+                    'max_streak': 0,
+                    'top_count': 0,
+                },
+                'top_students': [],
+                'current_user_entry': None,
+            }
+            return Response(data)
+
+        # Sort tuỳ theo mode
+        if mode == 'best':
+            # Xếp theo streak cao nhất của từng user
+            streak_data.sort(
+                key=lambda x: (
+                    -x['longest_ever_streak'],
+                    -x['current_streak'],
+                )
+            )
+        else:
+            # Mặc định: streak hiện tại
+            streak_data.sort(
+                key=lambda x: (
+                    -x['current_streak'],
+                    -x['longest_ever_streak'],
+                )
+            )
+
+        all_with_rank = []
+        current_user_entry = None
+        for idx, entry in enumerate(streak_data):
+            clean = {
+                'rank': idx + 1,
+                'user_id': entry['user_id'],
+                'username': entry['username'],
+                'full_name': entry['full_name'],
+                'current_streak': entry['current_streak'],
+                'longest_ever_streak': entry['longest_ever_streak'],
+                'is_current_user': entry['is_current_user'],
+            }
+            all_with_rank.append(clean)
+            if entry['is_current_user']:
+                current_user_entry = clean.copy()
+
+        top_students = all_with_rank[:limit]
+        current_user_in_top = any(s.get('is_current_user') for s in top_students)
+
+        streak_values = [s['current_streak'] for s in all_with_rank if s['current_streak'] > 0]
+        total_with_streak = len(streak_values)
+
+        data = {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'streak',
+            'mode': mode,
+            'timestamp': timezone.now().isoformat(),
+            'summary': {
+                'total_students_with_streak': total_with_streak,
+                'avg_streak': round(sum(streak_values) / total_with_streak, 1) if total_with_streak else 0.0,
+                'max_streak': max(streak_values) if streak_values else 0,
                 'top_count': len(top_students),
             },
             'top_students': top_students,

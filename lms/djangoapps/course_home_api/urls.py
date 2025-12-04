@@ -94,6 +94,15 @@ urlpatterns += [
     ),
 ]
 
+# Top Streak Leaderboard URLs
+urlpatterns += [
+    re_path(
+        fr'^top-streak/{settings.COURSE_KEY_PATTERN}$',
+        TopStreakView.as_view(),
+        name='top-streak'
+    ),
+]
+
 # Progress Tab URLs
 urlpatterns += [
     re_path(
