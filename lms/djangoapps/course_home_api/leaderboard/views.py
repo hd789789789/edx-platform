@@ -280,12 +280,114 @@ class TopGradesView(RetrieveAPIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = TopGradesSerializer
 
+    def _generate_mock_data(self, request, limit, course_key_string):
+        """Generate mock test data for leaderboard testing"""
+        import random
+        
+        # Vietnamese names
+        first_names = ['An', 'Bình', 'Cường', 'Dũng', 'Đức', 'Giang', 'Hà', 'Hải', 'Hiếu', 'Hoàng',
+                      'Hùng', 'Hương', 'Khang', 'Khánh', 'Kiên', 'Lan', 'Linh', 'Long', 'Mai', 'Minh',
+                      'Nam', 'Nga', 'Ngọc', 'Nhân', 'Như', 'Phong', 'Phúc', 'Quang', 'Quốc', 'Sơn',
+                      'Tâm', 'Thảo', 'Thành', 'Thiên', 'Thịnh', 'Thu', 'Thủy', 'Tiến', 'Trang', 'Trí',
+                      'Trung', 'Tú', 'Tuấn', 'Uyên', 'Văn', 'Việt', 'Vũ', 'Xuân', 'Yến', 'Ý']
+        last_names = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng',
+                     'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý', 'Đinh', 'Lương', 'Trương', 'Cao']
+        
+        # Generate 100 mock students
+        all_students = []
+        for i in range(1, 101):
+            # Random grade (scale 10)
+            grade_type = random.choices(['high', 'medium', 'low', 'zero'], weights=[20, 40, 30, 10])[0]
+            if grade_type == 'high':
+                grade = round(random.uniform(7.0, 10.0), 1)
+            elif grade_type == 'medium':
+                grade = round(random.uniform(4.0, 7.0), 1)
+            elif grade_type == 'low':
+                grade = round(random.uniform(1.0, 4.0), 1)
+            else:
+                grade = 0.0
+            
+            # Random time for tie-breaking
+            hours_ago = random.randint(1, 24 * 30)  # 1 hour to 30 days ago
+            grade_time = timezone.now() - timedelta(hours=hours_ago)
+            
+            all_students.append({
+                'user_id': 1000 + i,
+                'username': f'testuser_{i:03d}',
+                'full_name': f'{random.choice(last_names)} {random.choice(first_names)}',
+                'grade_percentage': grade,
+                'letter_grade': 'A' if grade >= 9 else 'B' if grade >= 8 else 'C' if grade >= 7 else 'D' if grade >= 6 else 'F',
+                'is_passed': grade >= 6,
+                'passed_date': grade_time.isoformat() if grade >= 6 else None,
+                'grade_modified': grade_time.isoformat(),
+                'tie_breaker_time': grade_time,
+                'is_current_user': False,
+            })
+        
+        # Add current user at random position
+        current_user_rank = random.randint(1, 100)
+        current_user_grade = round(random.uniform(3.0, 9.0), 1)
+        current_user_time = timezone.now() - timedelta(hours=random.randint(1, 500))
+        
+        current_user_entry = {
+            'user_id': request.user.id,
+            'username': request.user.username,
+            'full_name': getattr(request.user, 'profile', None) and request.user.profile.name or request.user.username,
+            'grade_percentage': current_user_grade,
+            'letter_grade': 'A' if current_user_grade >= 9 else 'B' if current_user_grade >= 8 else 'C' if current_user_grade >= 7 else 'D' if current_user_grade >= 6 else 'F',
+            'is_passed': current_user_grade >= 6,
+            'passed_date': current_user_time.isoformat() if current_user_grade >= 6 else None,
+            'grade_modified': current_user_time.isoformat(),
+            'tie_breaker_time': current_user_time,
+            'is_current_user': True,
+        }
+        all_students.append(current_user_entry)
+        
+        # Sort by grade (desc), then by time (asc)
+        all_students.sort(key=lambda x: (-x['grade_percentage'], x['tie_breaker_time']))
+        
+        # Assign ranks (no ties)
+        for idx, student in enumerate(all_students):
+            student['rank'] = idx + 1
+            if student['is_current_user']:
+                current_user_entry = student.copy()
+        
+        # Get top students
+        top_students = all_students[:limit]
+        current_user_in_top = any(s['is_current_user'] for s in top_students)
+        
+        # Calculate summary
+        all_grades = [s['grade_percentage'] for s in all_students]
+        
+        return {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'grades',
+            'timestamp': timezone.now().isoformat(),
+            'test_mode': True,
+            'summary': {
+                'total_students': len(all_students),
+                'avg_grade': round(sum(all_grades) / len(all_grades), 1),
+                'max_grade': max(all_grades),
+                'min_grade': min(all_grades),
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
+        }
+
     def get(self, request, *args, **kwargs):
         course_key_string = kwargs.get('course_key_string')
         course_key = CourseKey.from_string(course_key_string)
 
         # Get query parameters
         limit = int(request.query_params.get('limit', 10))
+        test_mode = request.query_params.get('test', '').lower() == 'true'
+        
+        # Return mock data if test mode
+        if test_mode:
+            data = self._generate_mock_data(request, limit, course_key_string)
+            return Response(data)
 
         # Enable NR tracing for this view based on course
         monitoring_utils.set_custom_attribute('course_id', course_key_string)
@@ -493,6 +595,92 @@ class TopProgressView(RetrieveAPIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = TopProgressSerializer
 
+    def _generate_mock_data(self, request, limit, course_key_string, period):
+        """Generate mock test data for progress leaderboard testing"""
+        import random
+        
+        # Vietnamese names
+        first_names = ['An', 'Bình', 'Cường', 'Dũng', 'Đức', 'Giang', 'Hà', 'Hải', 'Hiếu', 'Hoàng',
+                      'Hùng', 'Hương', 'Khang', 'Khánh', 'Kiên', 'Lan', 'Linh', 'Long', 'Mai', 'Minh',
+                      'Nam', 'Nga', 'Ngọc', 'Nhân', 'Như', 'Phong', 'Phúc', 'Quang', 'Quốc', 'Sơn',
+                      'Tâm', 'Thảo', 'Thành', 'Thiên', 'Thịnh', 'Thu', 'Thủy', 'Tiến', 'Trang', 'Trí',
+                      'Trung', 'Tú', 'Tuấn', 'Uyên', 'Văn', 'Việt', 'Vũ', 'Xuân', 'Yến', 'Ý']
+        last_names = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng',
+                     'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý', 'Đinh', 'Lương', 'Trương', 'Cao']
+        
+        # Generate 100 mock students
+        all_students = []
+        for i in range(1, 101):
+            # Random progress (0-100%)
+            progress_type = random.choices(['high', 'medium', 'low', 'zero'], weights=[15, 35, 35, 15])[0]
+            if progress_type == 'high':
+                progress = round(random.uniform(70.0, 100.0), 1)
+            elif progress_type == 'medium':
+                progress = round(random.uniform(30.0, 70.0), 1)
+            elif progress_type == 'low':
+                progress = round(random.uniform(5.0, 30.0), 1)
+            else:
+                progress = 0.0
+            
+            # Random enrollment time for tie-breaking
+            days_ago = random.randint(1, 90)
+            enroll_time = timezone.now() - timedelta(days=days_ago)
+            
+            all_students.append({
+                'user_id': 1000 + i,
+                'username': f'testuser_{i:03d}',
+                'full_name': f'{random.choice(last_names)} {random.choice(first_names)}',
+                'progress_percent': progress,
+                'tie_breaker_time': enroll_time,
+                'is_current_user': False,
+            })
+        
+        # Add current user at random position
+        current_user_progress = round(random.uniform(20.0, 90.0), 1)
+        current_user_time = timezone.now() - timedelta(days=random.randint(1, 60))
+        
+        current_user_entry = {
+            'user_id': request.user.id,
+            'username': request.user.username,
+            'full_name': getattr(request.user, 'profile', None) and request.user.profile.name or request.user.username,
+            'progress_percent': current_user_progress,
+            'tie_breaker_time': current_user_time,
+            'is_current_user': True,
+        }
+        all_students.append(current_user_entry)
+        
+        # Sort by progress (desc), then by enrollment time (asc)
+        all_students.sort(key=lambda x: (-x['progress_percent'], x['tie_breaker_time']))
+        
+        # Assign ranks (no ties)
+        for idx, student in enumerate(all_students):
+            student['rank'] = idx + 1
+            if student['is_current_user']:
+                current_user_entry = student.copy()
+        
+        # Get top students
+        top_students = all_students[:limit]
+        current_user_in_top = any(s['is_current_user'] for s in top_students)
+        
+        # Calculate summary
+        all_progress = [s['progress_percent'] for s in all_students]
+        
+        return {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'progress',
+            'period': period,
+            'timestamp': timezone.now().isoformat(),
+            'test_mode': True,
+            'summary': {
+                'total_students_with_progress': len(all_students),
+                'avg_progress': round(sum(all_progress) / len(all_progress), 1),
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
+        }
+
     def get(self, request, *args, **kwargs):
         course_key_string = kwargs.get('course_key_string')
         course_key = CourseKey.from_string(course_key_string)
@@ -500,6 +688,12 @@ class TopProgressView(RetrieveAPIView):
         # Get query parameters
         period = request.query_params.get('period', 'all')
         limit = int(request.query_params.get('limit', 10))
+        test_mode = request.query_params.get('test', '').lower() == 'true'
+        
+        # Return mock data if test mode
+        if test_mode:
+            data = self._generate_mock_data(request, limit, course_key_string, period)
+            return Response(data)
 
         # Enable NR tracing for this view based on course
         monitoring_utils.set_custom_attribute('course_id', course_key_string)
