@@ -61,12 +61,12 @@ urlpatterns = [
         name="discussion_course_roles",
     ),
     re_path(
-        fr"^v1/courses/{settings.COURSE_ID_PATTERN}",
+        fr"^v1/courses/{settings.COURSE_ID_PATTERN}/?$",
         CourseView.as_view(),
         name="discussion_course"
     ),
     re_path(
-        fr"^v2/courses/{settings.COURSE_ID_PATTERN}",
+        fr"^v2/courses/{settings.COURSE_ID_PATTERN}/?$",
         CourseViewV2.as_view(),
         name="discussion_course_v2"
     ),

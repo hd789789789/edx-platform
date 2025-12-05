@@ -208,3 +208,4 @@ Component tự động hỗ trợ dark mode dựa trên theme của hệ thống
 - [ ] Thêm search trong chat
 - [ ] Thêm typing indicator
 
+
