@@ -1002,6 +1002,11 @@ urlpatterns += [
     path('api/course_home/v1/', include(('lms.djangoapps.course_home_api.urls', 'course-home-v1'))),
 ]
 
+# Learner Chat API urls
+urlpatterns += [
+    path('api/learner_chat/', include('lms.djangoapps.learner_chat.urls')),
+]
+
 # User Tour API urls
 urlpatterns += [
     path('api/user_tours/', include('lms.djangoapps.user_tours.urls')),

@@ -3112,6 +3112,9 @@ INSTALLED_APPS = [
     # Course home api
     'lms.djangoapps.course_home_api',
 
+    # Learner chat
+    'lms.djangoapps.learner_chat',
+
     # User tours
     'lms.djangoapps.user_tours',
 
