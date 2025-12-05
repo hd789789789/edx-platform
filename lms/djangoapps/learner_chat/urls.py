@@ -16,12 +16,12 @@ delete_message_view = ChatRoomViewSet.as_view({
 
 urlpatterns = [
     re_path(
-        fr'^(?P<course_key_string>{settings.COURSE_KEY_PATTERN})/(?P<chat_type>general|qa|technical)/messages/$',
+        fr'^{settings.COURSE_KEY_PATTERN}/(?P<chat_type>general|qa|technical)/messages/$',
         viewset,
         name='chat-messages'
     ),
     re_path(
-        fr'^(?P<course_key_string>{settings.COURSE_KEY_PATTERN})/(?P<chat_type>general|qa|technical)/messages/(?P<message_id>\d+)/$',
+        fr'^{settings.COURSE_KEY_PATTERN}/(?P<chat_type>general|qa|technical)/messages/(?P<message_id>\d+)/$',
         delete_message_view,
         name='chat-delete-message'
     ),
