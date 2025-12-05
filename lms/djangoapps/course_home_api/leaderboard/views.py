@@ -860,7 +860,7 @@ class TopStreakView(RetrieveAPIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = TopStreakSerializer
 
-    def _generate_mock_data(self, request, limit, course_key_string):
+    def _generate_mock_data(self, request, limit, course_key_string, mode):
         """
         Sinh dữ liệu mock để test leaderboard streak (không đụng DB thực).
         """
@@ -912,25 +912,42 @@ class TopStreakView(RetrieveAPIView):
         }
         all_students.append(current_user_entry)
 
-        # Sort tuỳ theo mode
+        # Sort tuỳ theo mode với tie-breaking
         if mode == 'best':
-            # Xếp theo streak cao nhất từng user
-            all_students.sort(key=lambda x: (-x['longest_ever_streak'], -x['current_streak']))
+            # Xếp theo streak cao nhất từng user, tie-breaking bằng username
+            all_students.sort(key=lambda x: (-x['longest_ever_streak'], -x['current_streak'], x['username'].lower()))
         else:
-            # Mặc định: streak hiện tại
-            all_students.sort(key=lambda x: (-x['current_streak'], -x['longest_ever_streak']))
+            # Mặc định: streak hiện tại, tie-breaking bằng longest_ever_streak rồi username
+            all_students.sort(key=lambda x: (-x['current_streak'], -x['longest_ever_streak'], x['username'].lower()))
 
-        # Gán rank
+        # Build leaderboard with ranking (handle ties)
+        all_with_rank = []
+        rank = 1
+        previous_streak = None
+
         for idx, s in enumerate(all_students):
-            s['rank'] = idx + 1
+            # Handle tie scores - same streak gets same rank
+            if mode == 'best':
+                current_key = (s['longest_ever_streak'], s['current_streak'])
+                if previous_streak is not None and current_key != previous_streak:
+                    rank = idx + 1
+                previous_streak = current_key
+            else:
+                current_key = (s['current_streak'], s['longest_ever_streak'])
+                if previous_streak is not None and current_key != previous_streak:
+                    rank = idx + 1
+                previous_streak = current_key
+
+            s['rank'] = rank
+            all_with_rank.append(s)
             if s['is_current_user']:
                 current_user_entry = s.copy()
 
-        top_students = all_students[:limit]
+        top_students = all_with_rank[:limit]
         current_user_in_top = any(s['is_current_user'] for s in top_students)
 
         # Dùng current_streak để tính thống kê tổng quan
-        streak_values = [s['current_streak'] for s in all_students if s['current_streak'] > 0]
+        streak_values = [s['current_streak'] for s in all_with_rank if s['current_streak'] > 0]
         total_with_streak = len(streak_values)
 
         return {
@@ -1014,10 +1031,6 @@ class TopStreakView(RetrieveAPIView):
             longest_ever = celebration.longest_ever_streak if celebration else 0
 
             is_current_user = (user.id == request.user.id)
-            if current_streak <= 0 and not is_current_user:
-                # Bảng streak chỉ hiển thị những người đang có streak > 0,
-                # ngoại trừ chính tài khoản đang đăng nhập để vẫn cho họ thấy số ngày hiện tại (kể cả 0).
-                continue
 
             try:
                 display_name = user.profile.name if user.profile.name else user.username
@@ -1033,47 +1046,48 @@ class TopStreakView(RetrieveAPIView):
                 'is_current_user': is_current_user,
             })
 
-        # Nếu không ai có streak, trả về rỗng
-        if not streak_data:
-            data = {
-                'success': True,
-                'course_id': course_key_string,
-                'leaderboard_type': 'streak',
-                'timestamp': timezone.now().isoformat(),
-                'summary': {
-                    'total_students_with_streak': 0,
-                    'avg_streak': 0.0,
-                    'max_streak': 0,
-                    'top_count': 0,
-                },
-                'top_students': [],
-                'current_user_entry': None,
-            }
-            return Response(data)
-
-        # Sort tuỳ theo mode
+        # Sort tuỳ theo mode với tie-breaking
         if mode == 'best':
-            # Xếp theo streak cao nhất của từng user
+            # Xếp theo streak cao nhất của từng user, tie-breaking bằng username
             streak_data.sort(
                 key=lambda x: (
                     -x['longest_ever_streak'],
                     -x['current_streak'],
+                    x['username'].lower(),  # Tie-breaking: username alphabetically
                 )
             )
         else:
-            # Mặc định: streak hiện tại
+            # Mặc định: streak hiện tại, tie-breaking bằng longest_ever_streak rồi username
             streak_data.sort(
                 key=lambda x: (
                     -x['current_streak'],
                     -x['longest_ever_streak'],
+                    x['username'].lower(),  # Tie-breaking: username alphabetically
                 )
             )
 
+        # Build leaderboard with ranking (handle ties)
         all_with_rank = []
         current_user_entry = None
+        rank = 1
+        previous_streak = None
+        previous_longest = None
+
         for idx, entry in enumerate(streak_data):
+            # Handle tie scores - same streak gets same rank
+            if mode == 'best':
+                current_key = (entry['longest_ever_streak'], entry['current_streak'])
+                if previous_streak is not None and current_key != previous_streak:
+                    rank = idx + 1
+                previous_streak = current_key
+            else:
+                current_key = (entry['current_streak'], entry['longest_ever_streak'])
+                if previous_streak is not None and current_key != previous_streak:
+                    rank = idx + 1
+                previous_streak = current_key
+
             clean = {
-                'rank': idx + 1,
+                'rank': rank,
                 'user_id': entry['user_id'],
                 'username': entry['username'],
                 'full_name': entry['full_name'],
