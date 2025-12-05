@@ -28,6 +28,11 @@ ROUTER = SimpleRouter()
 ROUTER.register("threads", ThreadViewSet, basename="thread")
 ROUTER.register("comments", CommentViewSet, basename="comment")
 
+# Pattern để match course ID với hoặc không có trailing slash
+# COURSE_ID_PATTERN kết thúc với [^/?]+ nên không match trailing slash
+# Tạo pattern mới: match course_id (không có trailing slash) + optional trailing slash
+COURSE_ID_WITH_SLASH_PATTERN = settings.COURSE_ID_PATTERN + r'/?'
+
 urlpatterns = [
     re_path(
         r"^v1/courses/{}/settings$".format(
@@ -60,32 +65,34 @@ urlpatterns = [
         CourseDiscussionRolesAPIView.as_view(),
         name="discussion_course_roles",
     ),
+    # v2 routes phải đặt trước v1 để tránh conflict
+    # Sử dụng pattern mới để match cả trailing slash
     re_path(
-        fr"^v1/courses/{settings.COURSE_ID_PATTERN}/?$",
-        CourseView.as_view(),
-        name="discussion_course"
-    ),
-    re_path(
-        fr"^v2/courses/{settings.COURSE_ID_PATTERN}/?$",
+        fr"^v2/courses/{COURSE_ID_WITH_SLASH_PATTERN}$",
         CourseViewV2.as_view(),
         name="discussion_course_v2"
+    ),
+    re_path(
+        fr"^v1/courses/{COURSE_ID_WITH_SLASH_PATTERN}$",
+        CourseView.as_view(),
+        name="discussion_course"
     ),
     re_path(r'^v1/accounts/retire_forum/?$',
             RetireUserView.as_view(), name="retire_discussion_user"),
     path('v1/accounts/replace_username', ReplaceUsernamesView.as_view(),
          name="replace_discussion_username"),
     re_path(
-        fr"^v1/course_topics/{settings.COURSE_ID_PATTERN}/?$",
+        fr"^v1/course_topics/{COURSE_ID_WITH_SLASH_PATTERN}$",
         CourseTopicsView.as_view(),
         name="course_topics"
     ),
     re_path(
-        fr"^v2/course_topics/{settings.COURSE_ID_PATTERN}/?$",
+        fr"^v2/course_topics/{COURSE_ID_WITH_SLASH_PATTERN}$",
         CourseTopicsViewV2.as_view(),
         name="course_topics_v2"
     ),
     re_path(
-        fr"^v3/course_topics/{settings.COURSE_ID_PATTERN}/?$",
+        fr"^v3/course_topics/{COURSE_ID_WITH_SLASH_PATTERN}$",
         CourseTopicsViewV3.as_view(),
         name="course_topics_v3"
     ),
