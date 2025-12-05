@@ -889,18 +889,24 @@ class TopStreakView(RetrieveAPIView):
 
             longest_ever = max(current_streak, random.randint(current_streak, 40))
 
+            # Random enrollment time for tie-breaking (earlier = better rank)
+            days_ago = random.randint(1, 90)
+            enroll_time = timezone.now() - timedelta(days=days_ago)
+
             all_students.append({
                 'user_id': 1000 + i,
                 'username': f'testuser_{i:03d}',
                 'full_name': f'{random.choice(last_names)} {random.choice(first_names)}',
                 'current_streak': current_streak,
                 'longest_ever_streak': longest_ever,
+                'tie_breaker_time': enroll_time,
                 'is_current_user': False,
             })
 
         # Thêm current user
         current_streak = random.randint(0, 25)
         longest_ever = max(current_streak, random.randint(current_streak, 35))
+        current_user_time = timezone.now() - timedelta(days=random.randint(1, 60))
 
         current_user_entry = {
             'user_id': request.user.id,
@@ -908,37 +914,25 @@ class TopStreakView(RetrieveAPIView):
             'full_name': getattr(request.user, 'profile', None) and request.user.profile.name or request.user.username,
             'current_streak': current_streak,
             'longest_ever_streak': longest_ever,
+            'tie_breaker_time': current_user_time,
             'is_current_user': True,
         }
         all_students.append(current_user_entry)
 
-        # Sort tuỳ theo mode với tie-breaking
+        # Sort tuỳ theo mode với tie-breaking bằng ngày tham gia (earlier = better rank)
         if mode == 'best':
-            # Xếp theo streak cao nhất từng user, tie-breaking bằng username
-            all_students.sort(key=lambda x: (-x['longest_ever_streak'], -x['current_streak'], x['username'].lower()))
+            # Xếp theo streak cao nhất từng user, tie-breaking bằng ngày tham gia
+            all_students.sort(key=lambda x: (-x['longest_ever_streak'], -x['current_streak'], x['tie_breaker_time']))
         else:
-            # Mặc định: streak hiện tại, tie-breaking bằng longest_ever_streak rồi username
-            all_students.sort(key=lambda x: (-x['current_streak'], -x['longest_ever_streak'], x['username'].lower()))
+            # Mặc định: streak hiện tại, tie-breaking bằng longest_ever_streak rồi ngày tham gia
+            all_students.sort(key=lambda x: (-x['current_streak'], -x['longest_ever_streak'], x['tie_breaker_time']))
 
-        # Build leaderboard with ranking (handle ties)
+        # Build leaderboard with ranking (no ties - each user gets unique rank)
+        # Since we already sorted with tie-breaking (username), each user gets a unique rank
         all_with_rank = []
-        rank = 1
-        previous_streak = None
 
         for idx, s in enumerate(all_students):
-            # Handle tie scores - same streak gets same rank
-            if mode == 'best':
-                current_key = (s['longest_ever_streak'], s['current_streak'])
-                if previous_streak is not None and current_key != previous_streak:
-                    rank = idx + 1
-                previous_streak = current_key
-            else:
-                current_key = (s['current_streak'], s['longest_ever_streak'])
-                if previous_streak is not None and current_key != previous_streak:
-                    rank = idx + 1
-                previous_streak = current_key
-
-            s['rank'] = rank
+            s['rank'] = idx + 1  # No ties - each user gets unique rank based on sort order
             all_with_rank.append(s)
             if s['is_current_user']:
                 current_user_entry = s.copy()
@@ -1010,6 +1004,9 @@ class TopStreakView(RetrieveAPIView):
             is_active=True,
         ).select_related('user')
 
+        # Tạo dict để map user_id -> enrollment created timestamp (dùng cho tie-breaking)
+        enrollment_dict = {e.user_id: e.created for e in enrollments_qs}
+
         enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
         users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
 
@@ -1037,57 +1034,49 @@ class TopStreakView(RetrieveAPIView):
             except Exception:
                 display_name = user.username
 
+            # Tie-breaking: dùng enrollment created hoặc user date_joined
+            tie_breaker_time = enrollment_dict.get(user.id)
+            if not tie_breaker_time:
+                tie_breaker_time = user.date_joined
+
             streak_data.append({
                 'user_id': user.id,
                 'username': user.username,
                 'full_name': display_name,
                 'current_streak': current_streak,
                 'longest_ever_streak': longest_ever,
+                'tie_breaker_time': tie_breaker_time,  # Dùng để sort tie-breaking
                 'is_current_user': is_current_user,
             })
 
-        # Sort tuỳ theo mode với tie-breaking
+        # Sort tuỳ theo mode với tie-breaking bằng ngày tham gia (earlier = better rank)
         if mode == 'best':
-            # Xếp theo streak cao nhất của từng user, tie-breaking bằng username
+            # Xếp theo streak cao nhất của từng user, tie-breaking bằng ngày tham gia
             streak_data.sort(
                 key=lambda x: (
                     -x['longest_ever_streak'],
                     -x['current_streak'],
-                    x['username'].lower(),  # Tie-breaking: username alphabetically
+                    x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now(),  # Tie-breaking: earlier enrollment = better rank
                 )
             )
         else:
-            # Mặc định: streak hiện tại, tie-breaking bằng longest_ever_streak rồi username
+            # Mặc định: streak hiện tại, tie-breaking bằng longest_ever_streak rồi ngày tham gia
             streak_data.sort(
                 key=lambda x: (
                     -x['current_streak'],
                     -x['longest_ever_streak'],
-                    x['username'].lower(),  # Tie-breaking: username alphabetically
+                    x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now(),  # Tie-breaking: earlier enrollment = better rank
                 )
             )
 
-        # Build leaderboard with ranking (handle ties)
+        # Build leaderboard with ranking (no ties - each user gets unique rank)
+        # Since we already sorted with tie-breaking (username), each user gets a unique rank
         all_with_rank = []
         current_user_entry = None
-        rank = 1
-        previous_streak = None
-        previous_longest = None
 
         for idx, entry in enumerate(streak_data):
-            # Handle tie scores - same streak gets same rank
-            if mode == 'best':
-                current_key = (entry['longest_ever_streak'], entry['current_streak'])
-                if previous_streak is not None and current_key != previous_streak:
-                    rank = idx + 1
-                previous_streak = current_key
-            else:
-                current_key = (entry['current_streak'], entry['longest_ever_streak'])
-                if previous_streak is not None and current_key != previous_streak:
-                    rank = idx + 1
-                previous_streak = current_key
-
             clean = {
-                'rank': rank,
+                'rank': idx + 1,  # No ties - each user gets unique rank based on sort order
                 'user_id': entry['user_id'],
                 'username': entry['username'],
                 'full_name': entry['full_name'],
