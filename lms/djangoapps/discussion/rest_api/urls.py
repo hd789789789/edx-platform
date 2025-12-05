@@ -44,7 +44,7 @@ urlpatterns = [
         name="discussion_learner_threads",
     ),
     re_path(
-        fr"^v1/courses/{settings.COURSE_KEY_PATTERN}/activity_stats",
+        fr"^v1/courses/{settings.COURSE_KEY_PATTERN}/activity_stats/?$",
         CourseActivityStatsView.as_view(),
         name="discussion_course_activity_stats",
     ),
@@ -70,20 +70,22 @@ urlpatterns = [
         CourseViewV2.as_view(),
         name="discussion_course_v2"
     ),
-    re_path(r'^v1/accounts/retire_forum/?$', RetireUserView.as_view(), name="retire_discussion_user"),
-    path('v1/accounts/replace_username', ReplaceUsernamesView.as_view(), name="replace_discussion_username"),
+    re_path(r'^v1/accounts/retire_forum/?$',
+            RetireUserView.as_view(), name="retire_discussion_user"),
+    path('v1/accounts/replace_username', ReplaceUsernamesView.as_view(),
+         name="replace_discussion_username"),
     re_path(
-        fr"^v1/course_topics/{settings.COURSE_ID_PATTERN}",
+        fr"^v1/course_topics/{settings.COURSE_ID_PATTERN}/?$",
         CourseTopicsView.as_view(),
         name="course_topics"
     ),
     re_path(
-        fr"^v2/course_topics/{settings.COURSE_ID_PATTERN}",
+        fr"^v2/course_topics/{settings.COURSE_ID_PATTERN}/?$",
         CourseTopicsViewV2.as_view(),
         name="course_topics_v2"
     ),
     re_path(
-        fr"^v3/course_topics/{settings.COURSE_ID_PATTERN}",
+        fr"^v3/course_topics/{settings.COURSE_ID_PATTERN}/?$",
         CourseTopicsViewV3.as_view(),
         name="course_topics_v3"
     ),
