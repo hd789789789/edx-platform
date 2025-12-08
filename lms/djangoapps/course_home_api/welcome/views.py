@@ -51,13 +51,13 @@ class WelcomeTabView(RetrieveAPIView):
             completion_percent: (float) Course completion percentage
             today_lessons: (int) Number of lessons available today
             class_rank: (int) User's rank in the class (based on completion/grade)
-        
+
         important_dates: List of important course dates
             date: (str) Date in ISO format
             title: (str) Title of the date event
             status: (str) Status: 'completed', 'upcoming', 'important', 'today', 'future'
             days_left: (int, optional) Days remaining for important dates
-        
+
         daily_quests: List of daily quests/tasks (placeholder for future implementation)
     """
     authentication_classes = (
@@ -90,8 +90,10 @@ class WelcomeTabView(RetrieveAPIView):
         course_overview = CourseOverview.get_from_id(course_key)
 
         # Get completion summary
-        completion_summary = get_course_blocks_completion_summary(course_key, request.user)
-        total_blocks = completion_summary.get('complete_count', 0) + completion_summary.get('incomplete_count', 0)
+        completion_summary = get_course_blocks_completion_summary(
+            course_key, request.user)
+        total_blocks = completion_summary.get(
+            'complete_count', 0) + completion_summary.get('incomplete_count', 0)
         completion_percent = 0.0
         if total_blocks > 0:
             completion_percent = round(
@@ -99,18 +101,21 @@ class WelcomeTabView(RetrieveAPIView):
             )
 
         # Get course grade for ranking
-        collected_block_structure = get_block_structure_manager(course_key).get_collected()
+        collected_block_structure = get_block_structure_manager(
+            course_key).get_collected()
         course_grade = CourseGradeFactory().read(
             request.user, collected_block_structure=collected_block_structure
         )
-        course_grade.update(visible_grades_only=True, has_staff_access=is_staff)
+        course_grade.update(visible_grades_only=True,
+                            has_staff_access=is_staff)
 
         # Get streak data
         streak_days = 0
         if not is_masquerading_as_specific_student(request.user, course_key):
             try:
                 # Update streak first
-                UserCelebration.perform_streak_updates(request.user, course_key)
+                UserCelebration.perform_streak_updates(
+                    request.user, course_key)
                 # Get current streak
                 try:
                     celebration = request.user.celebration
@@ -138,13 +143,16 @@ class WelcomeTabView(RetrieveAPIView):
             user = enrollment.user
             if user.is_anonymous:
                 continue
-            
-            user_completion = get_course_blocks_completion_summary(course_key, user)
-            user_total = user_completion.get('complete_count', 0) + user_completion.get('incomplete_count', 0)
+
+            user_completion = get_course_blocks_completion_summary(
+                course_key, user)
+            user_total = user_completion.get(
+                'complete_count', 0) + user_completion.get('incomplete_count', 0)
             user_percent = 0.0
             if user_total > 0:
-                user_percent = (user_completion.get('complete_count', 0) / user_total) * 100
-            
+                user_percent = (user_completion.get(
+                    'complete_count', 0) / user_total) * 100
+
             # Also consider grade if available
             try:
                 user_grade = CourseGradeFactory().read(
@@ -152,10 +160,11 @@ class WelcomeTabView(RetrieveAPIView):
                 )
                 user_grade.update(visible_grades_only=True)
                 # Combine completion and grade (weighted)
-                combined_score = (user_percent * 0.5) + (user_grade.percent * 0.5)
+                combined_score = (user_percent * 0.5) + \
+                    (user_grade.percent * 0.5)
             except Exception:
                 combined_score = user_percent
-            
+
             user_completions.append({
                 'user_id': user.id,
                 'score': combined_score,
@@ -163,7 +172,7 @@ class WelcomeTabView(RetrieveAPIView):
 
         # Sort by score descending
         user_completions.sort(key=lambda x: x['score'], reverse=True)
-        
+
         # Find current user's rank
         class_rank = 1
         for idx, entry in enumerate(user_completions):
@@ -173,7 +182,8 @@ class WelcomeTabView(RetrieveAPIView):
 
         # Get today's lessons count (sequences available today)
         transformers = BlockStructureTransformers()
-        transformers += [start_date.StartDateTransformer(), ContentTypeGateTransformer()]
+        transformers += [start_date.StartDateTransformer(),
+                         ContentTypeGateTransformer()]
         usage_key = collected_block_structure.root_block_usage_key
         course_blocks = get_course_blocks(
             request.user,
@@ -181,18 +191,23 @@ class WelcomeTabView(RetrieveAPIView):
             transformers=transformers,
             collected_block_structure=collected_block_structure,
         )
-        
+
         # Count sequences available today
         today_lessons = 0
         now = timezone.now()
         for block_key in course_blocks.get_block_keys():
-            block = course_blocks.get_xblock(block_key)
-            if block and hasattr(block, 'category') and block.category == 'sequential':
+            # Get block category from block structure
+            block_category = course_blocks.get_xblock_field(
+                block_key, 'category', None)
+            if block_category == 'sequential':
                 # Check if sequence is available
-                if hasattr(block, 'start') and block.start:
-                    if block.start <= now:
+                block_start = course_blocks.get_xblock_field(
+                    block_key, 'start', None)
+                if block_start:
+                    if block_start <= now:
                         today_lessons += 1
                 else:
+                    # No start date means available
                     today_lessons += 1
 
         # Get important dates from course
@@ -203,7 +218,7 @@ class WelcomeTabView(RetrieveAPIView):
                 'title': 'Khóa học bắt đầu',
                 'status': 'completed' if course.start.date() < timezone.now().date() else 'upcoming',
             })
-        
+
         if course.end:
             days_left = (course.end.date() - timezone.now().date()).days
             important_dates.append({
@@ -238,4 +253,3 @@ class WelcomeTabView(RetrieveAPIView):
 
         serializer = self.get_serializer(data)
         return Response(serializer.data)
-

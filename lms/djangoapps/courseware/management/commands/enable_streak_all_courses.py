@@ -11,6 +11,7 @@ from lms.djangoapps.courseware.toggles import (
     COURSEWARE_MICROFRONTEND_PROGRESS_MILESTONES_STREAK_CELEBRATION,
 )
 
+
 class Command(BaseCommand):
     help = 'Enable streak flags for all existing courses. This is a one-time script for courses created before auto-enable.'
 
@@ -31,18 +32,20 @@ class Command(BaseCommand):
         skip_existing = options['skip_existing']
 
         flags_to_enable = [
-            COURSEWARE_MICROFRONTEND_PROGRESS_MILESTONES.flag_name,
-            COURSEWARE_MICROFRONTEND_PROGRESS_MILESTONES_STREAK_CELEBRATION.flag_name,
+            COURSEWARE_MICROFRONTEND_PROGRESS_MILESTONES.name,
+            COURSEWARE_MICROFRONTEND_PROGRESS_MILESTONES_STREAK_CELEBRATION.name,
         ]
 
         courses = CourseOverview.objects.all()
         total_courses = courses.count()
-        
-        self.stdout.write(self.style.SUCCESS(f"Found {total_courses} courses to process."))
-        
+
+        self.stdout.write(self.style.SUCCESS(
+            f"Found {total_courses} courses to process."))
+
         if dry_run:
-            self.stdout.write(self.style.WARNING("DRY RUN MODE - No changes will be made."))
-        
+            self.stdout.write(self.style.WARNING(
+                "DRY RUN MODE - No changes will be made."))
+
         enabled_count = 0
         skipped_count = 0
         error_count = 0
@@ -50,7 +53,7 @@ class Command(BaseCommand):
         for course in courses:
             course_enabled = True
             course_skipped = False
-            
+
             for flag_name in flags_to_enable:
                 # Check if flag already exists
                 existing = WaffleFlagCourseOverrideModel.objects.filter(
@@ -58,7 +61,7 @@ class Command(BaseCommand):
                     course_id=course.id,
                     enabled=True
                 ).first()
-                
+
                 if existing:
                     if skip_existing:
                         course_skipped = True
@@ -104,14 +107,14 @@ class Command(BaseCommand):
                                 f"  Would create flag {flag_name} for course {course.id}"
                             )
                         )
-            
+
             if course_skipped:
                 skipped_count += 1
             elif course_enabled:
                 enabled_count += 1
             else:
                 error_count += 1
-            
+
             if (enabled_count + skipped_count + error_count) % 10 == 0:
                 self.stdout.write(
                     f"Progress: {enabled_count} enabled, {skipped_count} skipped, {error_count} errors"
@@ -119,16 +122,20 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("\n" + "="*60))
         self.stdout.write(self.style.SUCCESS("Summary:"))
-        self.stdout.write(self.style.SUCCESS(f"  Total courses: {total_courses}"))
+        self.stdout.write(self.style.SUCCESS(
+            f"  Total courses: {total_courses}"))
         self.stdout.write(self.style.SUCCESS(f"  Enabled: {enabled_count}"))
         if skip_existing:
-            self.stdout.write(self.style.SUCCESS(f"  Skipped (already enabled): {skipped_count}"))
+            self.stdout.write(self.style.SUCCESS(
+                f"  Skipped (already enabled): {skipped_count}"))
         self.stdout.write(self.style.ERROR(f"  Errors: {error_count}"))
-        
+
         if dry_run:
-            self.stdout.write(self.style.WARNING("\nThis was a DRY RUN. No changes were made."))
-            self.stdout.write(self.style.WARNING("Run without --dry-run to apply changes."))
+            self.stdout.write(self.style.WARNING(
+                "\nThis was a DRY RUN. No changes were made."))
+            self.stdout.write(self.style.WARNING(
+                "Run without --dry-run to apply changes."))
         else:
             self.stdout.write(self.style.SUCCESS("\n✅ All courses processed!"))
-            self.stdout.write(self.style.SUCCESS("Note: New courses will automatically have streak enabled via signal handler."))
-
+            self.stdout.write(self.style.SUCCESS(
+                "Note: New courses will automatically have streak enabled via signal handler."))
