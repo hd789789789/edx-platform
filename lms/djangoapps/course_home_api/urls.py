@@ -23,6 +23,7 @@ from lms.djangoapps.course_home_api.leaderboard.views import (
     TopStreakView,
 )
 from lms.djangoapps.course_home_api.badge.views import BadgeView
+from lms.djangoapps.course_home_api.welcome.views import WelcomeTabView
 
 # This API is a BFF ("backend for frontend") designed for the learning MFE. It's not versioned because there is no
 # guarantee of stability over time. It may change from one Open edX release to another. Don't write any scripts
@@ -133,5 +134,14 @@ urlpatterns += [
         fr'^badge/{settings.COURSE_KEY_PATTERN}$',
         BadgeView.as_view(),
         name='badge-tab'
+    ),
+]
+
+# Welcome Tab URLs
+urlpatterns += [
+    re_path(
+        fr'^welcome/{settings.COURSE_KEY_PATTERN}$',
+        WelcomeTabView.as_view(),
+        name='welcome-tab'
     ),
 ]
