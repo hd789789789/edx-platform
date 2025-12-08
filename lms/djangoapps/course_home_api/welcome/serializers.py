@@ -11,6 +11,7 @@ class UserStatsSerializer(serializers.Serializer):
     completion_percent = serializers.FloatField()
     today_lessons = serializers.IntegerField()
     class_rank = serializers.IntegerField()
+    last_day_of_streak = serializers.CharField(required=False, allow_null=True)
 
 
 class ImportantDateSerializer(serializers.Serializer):
