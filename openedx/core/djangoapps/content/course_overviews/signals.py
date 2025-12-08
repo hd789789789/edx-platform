@@ -39,7 +39,8 @@ def _listen_for_course_publish(sender, course_key, **kwargs):  # pylint: disable
     except CourseOverview.DoesNotExist:
         previous_course_overview = None
     updated_course_overview = CourseOverview.load_from_module_store(course_key)
-    _check_for_course_changes(previous_course_overview, updated_course_overview)
+    _check_for_course_changes(
+        previous_course_overview, updated_course_overview)
 
 
 @receiver(SignalHandler.course_deleted)
@@ -50,7 +51,8 @@ def _listen_for_course_delete(sender, course_key, **kwargs):  # pylint: disable=
     """
     CourseOverview.objects.filter(id=course_key).delete()
     courserun_key = str(course_key)
-    LOG.info(f'DELETE_COURSE_DETAILS triggered upon course_deleted signal. Key: [{courserun_key}]')
+    LOG.info(
+        f'DELETE_COURSE_DETAILS triggered upon course_deleted signal. Key: [{courserun_key}]')
     # This signal will be handled in `federated_content_connector` plugin
     DELETE_COURSE_DETAILS.send(
         sender=None,
@@ -59,17 +61,59 @@ def _listen_for_course_delete(sender, course_key, **kwargs):  # pylint: disable=
 
 
 @receiver(post_save, sender=CourseOverview)
-def trigger_import_course_details_signal(sender, instance, created, **kwargs):  # lint-amnesty, pylint: disable=unused-argument
+# lint-amnesty, pylint: disable=unused-argument
+def trigger_import_course_details_signal(sender, instance, created, **kwargs):
     """
     Triggers the `IMPORT_COURSE_DETAILS` signal which will be handled in `federated_content_connector` plugin
     """
     if created:
         courserun_key = str(instance.id)
-        LOG.info(f'IMPORT_COURSE_DETAILS triggered upon CourseOverview.post_save signal. Key: [{courserun_key}]')
+        LOG.info(
+            f'IMPORT_COURSE_DETAILS triggered upon CourseOverview.post_save signal. Key: [{courserun_key}]')
         IMPORT_COURSE_DETAILS.send(
             sender=None,
             courserun_key=courserun_key,
         )
+        # Auto-enable streak celebration flags for new courses
+        _auto_enable_streak_flags(instance.id)
+
+
+def _auto_enable_streak_flags(course_key):
+    """
+    Automatically enable streak celebration waffle flags for a course.
+    This ensures streak works for all new courses without manual configuration.
+    """
+    try:
+        from openedx.core.djangoapps.waffle_utils.models import WaffleFlagCourseOverrideModel
+
+        flags_to_enable = [
+            'courseware.mfe_progress_milestones',
+            'courseware.mfe_progress_milestones_streak_celebration',
+        ]
+
+        for flag_name in flags_to_enable:
+            # Check if override already exists
+            existing = WaffleFlagCourseOverrideModel.objects.filter(
+                waffle_flag=flag_name,
+                course_id=course_key,
+                enabled=True
+            ).first()
+
+            if not existing:
+                # Create new override
+                WaffleFlagCourseOverrideModel.objects.create(
+                    waffle_flag=flag_name,
+                    course_id=course_key,
+                    override_choice='on',
+                    enabled=True,
+                    note='Auto-enabled via CourseOverview signal for streak celebration'
+                )
+                LOG.info(
+                    f'Auto-enabled streak flag {flag_name} for course {course_key}')
+    except Exception as e:
+        # Don't let streak flag errors break course creation
+        LOG.warning(
+            f'Failed to auto-enable streak flags for course {course_key}: {e}')
 
 
 def _check_for_course_changes(previous_course_overview, updated_course_overview):
@@ -86,9 +130,12 @@ def _check_for_course_changes(previous_course_overview, updated_course_overview)
         None
     """
     if previous_course_overview:
-        _check_for_course_start_date_changes(previous_course_overview, updated_course_overview)
-        _check_for_pacing_changes(previous_course_overview, updated_course_overview)
-        _check_for_cert_date_changes(previous_course_overview, updated_course_overview)
+        _check_for_course_start_date_changes(
+            previous_course_overview, updated_course_overview)
+        _check_for_pacing_changes(
+            previous_course_overview, updated_course_overview)
+        _check_for_cert_date_changes(
+            previous_course_overview, updated_course_overview)
 
 
 def _check_for_course_start_date_changes(previous_course_overview, updated_course_overview):
@@ -105,7 +152,8 @@ def _check_for_course_start_date_changes(previous_course_overview, updated_cours
         None
     """
     if previous_course_overview.start != updated_course_overview.start:
-        _log_start_date_change(previous_course_overview, updated_course_overview)
+        _log_start_date_change(previous_course_overview,
+                               updated_course_overview)
         COURSE_START_DATE_CHANGED.send(
             sender=None,
             updated_course_overview=updated_course_overview,
@@ -181,15 +229,18 @@ def _check_for_cert_date_changes(previous_course_overview, updated_course_overvi
         A callback used to fire the COURSE_CERT_DATE_CHANGE Django signal *after* the ORM has successfully commited the
         update.
         """
-        COURSE_CERT_DATE_CHANGE.send_robust(sender=None, course_key=str(updated_course_overview.id))
+        COURSE_CERT_DATE_CHANGE.send_robust(
+            sender=None, course_key=str(updated_course_overview.id))
 
     course_run_id = str(updated_course_overview.id)
     prev_available_date = previous_course_overview.certificate_available_date
     prev_display_behavior = previous_course_overview.certificates_display_behavior
-    prev_end_date = previous_course_overview.end  # `end_date` is a deprecated field, use `end` instead
+    # `end_date` is a deprecated field, use `end` instead
+    prev_end_date = previous_course_overview.end
     updated_available_date = updated_course_overview.certificate_available_date
     updated_display_behavior = updated_course_overview.certificates_display_behavior
-    updated_end_date = updated_course_overview.end  # `end_date` is a deprecated field, use `end` instead
+    # `end_date` is a deprecated field, use `end` instead
+    updated_end_date = updated_course_overview.end
     send_signal = False
 
     if prev_available_date != updated_available_date:
