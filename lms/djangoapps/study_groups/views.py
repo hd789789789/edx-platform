@@ -8,6 +8,7 @@ from django.conf import settings
 
 log = logging.getLogger(__name__)
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
 from django.http import Http404, FileResponse
 from django.utils.translation import gettext as _
@@ -55,6 +56,8 @@ from .serializers import (
     StudyGroupCreateSerializer,
     StudyGroupUpdateSerializer,
     StudyGroupMemberSerializer,
+    StudyGroupMemberCreateSerializer,
+    CourseEnrollmentUserSerializer,
     StudyGroupCommentSerializer,
     CommentCreateSerializer,
     CommentUpdateSerializer,
@@ -429,6 +432,62 @@ class StudyGroupMemberDetailView(DestroyAPIView):
             return queryset.get(user_id=user_id)
         except StudyGroupMember.DoesNotExist:
             raise Http404(_("Member not found"))
+
+
+class AvailableMembersPagination(DefaultPagination):
+    """Pagination for available members list."""
+    page_size = 5
+    page_size_query_param = 'page_size'
+    max_page_size = 50
+
+
+class AvailableGroupMembersListView(ListAPIView):
+    """
+    List enrolled users (of the course) who are not yet members of the group.
+    
+    GET /api/study-groups/{id}/available-members/?search=<query>&page=<n>
+    """
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = CourseEnrollmentUserSerializer
+    pagination_class = AvailableMembersPagination
+    
+    def get_queryset(self):
+        group_id = self.kwargs.get('id')
+        try:
+            group = StudyGroup.objects.get(id=group_id)
+        except StudyGroup.DoesNotExist:
+            raise Http404(_("Study group not found"))
+        
+        # Permission: only managers can view available members
+        if not can_user_manage_members(self.request.user, group):
+            raise PermissionDenied(_("You don't have permission to manage members."))
+        
+        # Users enrolled in course
+        enrolled_qs = CourseEnrollment.objects.filter(
+            course_id=group.course_id,
+            is_active=True,
+        ).values_list('user_id', flat=True)
+        
+        # Exclude existing members
+        member_user_ids = StudyGroupMember.objects.filter(group=group).values_list('user_id', flat=True)
+        
+        User = get_user_model()
+        users = User.objects.filter(id__in=enrolled_qs).exclude(id__in=member_user_ids)
+        
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            users = users.filter(
+                Q(username__icontains=search) |
+                Q(email__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search)
+            )
+        
+        return users.order_by('username')
 
 
 class StudyGroupCommentListView(ListCreateAPIView):

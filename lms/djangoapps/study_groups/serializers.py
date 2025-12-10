@@ -76,6 +76,19 @@ class StudyGroupMemberCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("Multiple users found with username or email: {}").format(value))
 
 
+class CourseEnrollmentUserSerializer(serializers.ModelSerializer):
+    """Serializer for enrolled users to add to study group."""
+    
+    full_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'full_name')
+    
+    def get_full_name(self, obj):
+        return obj.get_full_name() or obj.username
+
+
 class CommentAttachmentSerializer(serializers.ModelSerializer):
     """Serializer for comment attachments."""
     
@@ -298,6 +311,9 @@ class CommentCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudyGroupComment
         fields = ('group', 'parent_comment', 'content')
+        extra_kwargs = {
+            'group': {'required': False},
+        }
     
     def validate_group(self, value):
         """Validate that user can comment in this group."""

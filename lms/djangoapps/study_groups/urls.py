@@ -10,6 +10,7 @@ from .views import (
     StudyGroupDetailView,
     StudyGroupMemberListView,
     StudyGroupMemberDetailView,
+    AvailableGroupMembersListView,
     StudyGroupCommentListView,
     StudyGroupCommentDetailView,
     CommentReactionView,
@@ -40,6 +41,11 @@ urlpatterns = [
         'study-groups/<int:id>/members/<int:user_id>/',
         StudyGroupMemberDetailView.as_view(),
         name='study-groups-members-detail'
+    ),
+    path(
+        'study-groups/<int:id>/available-members/',
+        AvailableGroupMembersListView.as_view(),
+        name='study-groups-available-members'
     ),
 
     # Comments endpoints
