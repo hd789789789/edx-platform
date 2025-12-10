@@ -205,7 +205,8 @@ class StudyGroupListView(ListCreateAPIView):
             })
             raise PermissionDenied(_("You don't have permission to create study groups."))
         
-        serializer.save(created_by=user)
+        # Serializer already sets created_by from request context; avoid duplicate kwargs
+        serializer.save()
         group = serializer.instance
         
         log.info('Study group created', extra={
