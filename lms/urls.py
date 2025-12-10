@@ -681,6 +681,14 @@ if settings.FEATURES.get('ENABLE_TEAMS'):
         ),
     ]
 
+# Study Groups endpoints
+urlpatterns += [
+    path(
+        'api/study-groups/',
+        include('lms.djangoapps.study_groups.urls')
+    ),
+]
+
 # allow course staff to change to student view of courseware
 if settings.FEATURES.get('ENABLE_MASQUERADE'):
     urlpatterns += [

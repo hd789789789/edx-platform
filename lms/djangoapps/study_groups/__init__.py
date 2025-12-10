@@ -1,0 +1,4 @@
+"""
+Study Groups Django App
+"""
+
