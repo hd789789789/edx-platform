@@ -20,7 +20,7 @@ from .views import (
 urlpatterns = [
     # Study Groups endpoints
     re_path(
-        r'^courses/(?P<course_id>{})/study-groups/$'.format(settings.COURSE_ID_PATTERN),
+        r'^courses/{}/study-groups/$'.format(settings.COURSE_ID_PATTERN),
         StudyGroupListView.as_view(),
         name='study-groups-list'
     ),
