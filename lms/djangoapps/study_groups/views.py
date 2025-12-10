@@ -171,6 +171,21 @@ class StudyGroupListView(ListCreateAPIView):
             return StudyGroupCreateSerializer
         return StudyGroupSerializer
     
+    def list(self, request, *args, **kwargs):
+        """Override list to add permission info."""
+        response = super().list(request, *args, **kwargs)
+        course_id = self.kwargs.get('course_id')
+        user = request.user
+        
+        # Add permission info to response
+        can_create_group = can_user_create_group(user, course_id)
+        
+        # Add to response data (works for both paginated and non-paginated responses)
+        if isinstance(response.data, dict):
+            response.data['can_create_group'] = can_create_group
+        
+        return response
+    
     def perform_create(self, serializer):
         """Create a new study group with permission check."""
         course_id = self.kwargs.get('course_id')
