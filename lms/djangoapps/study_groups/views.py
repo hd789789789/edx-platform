@@ -16,8 +16,6 @@ from edx_rest_framework_extensions.paginators import DefaultPagination
 from opaque_keys import InvalidKeyError
 from opaque_keys.edx.keys import CourseKey
 from rest_framework import permissions, status
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.decorators import action
 from rest_framework.generics import (
     ListCreateAPIView,
     RetrieveUpdateDestroyAPIView,
@@ -29,13 +27,10 @@ from rest_framework.generics import (
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.viewsets import ModelViewSet
 
 from common.djangoapps.student.models import CourseEnrollment
 from lms.djangoapps.courseware.courses import get_course_with_access
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
-from openedx.core.lib.api.permissions import IsAuthenticatedOrReadOnly
-from openedx.core.lib.api.view_utils import build_api_error
 
 from .models import (
     StudyGroup,
