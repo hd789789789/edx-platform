@@ -215,18 +215,24 @@ class StudyGroupListView(ListCreateAPIView):
             'user_id': user.id,
         })
         
-        # Add creator as admin member
-        membership = StudyGroupMember.objects.create(
+        # Add creator as admin member (avoid duplicates if already added in serializer)
+        membership, created = StudyGroupMember.objects.get_or_create(
             group=group,
             user=user,
-            role='admin'
+            defaults={'role': 'admin'},
         )
         
-        log.info('Creator added as admin member', extra={
-            'group_id': group.id,
-            'membership_id': membership.id,
-            'user_id': user.id,
-        })
+        if created:
+            log.info('Creator added as admin member', extra={
+                'group_id': group.id,
+                'membership_id': membership.id,
+                'user_id': user.id,
+            })
+        else:
+            log.info('Creator already a member, skip adding duplicate', extra={
+                'group_id': group.id,
+                'user_id': user.id,
+            })
 
 
 class StudyGroupDetailView(RetrieveUpdateDestroyAPIView):
