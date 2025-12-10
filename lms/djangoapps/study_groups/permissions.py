@@ -28,9 +28,10 @@ def has_course_staff_privileges(user, course_id):
             course_key = course_id
             
         # Check if user is staff or instructor
+        # has_access returns AccessResponse object, convert to bool
         return (
-            has_access(user, 'staff', course_key) or
-            has_access(user, 'instructor', course_key) or
+            bool(has_access(user, 'staff', course_key)) or
+            bool(has_access(user, 'instructor', course_key)) or
             CourseStaffRole(course_key).has_user(user) or
             CourseInstructorRole(course_key).has_user(user)
         )
@@ -59,7 +60,7 @@ def is_course_admin(user, course_id):
             course_key = course_id
             
         return (
-            has_access(user, 'instructor', course_key) or
+            bool(has_access(user, 'instructor', course_key)) or
             CourseInstructorRole(course_key).has_user(user)
         )
     except Exception:
@@ -87,7 +88,7 @@ def is_course_staff(user, course_id):
             course_key = course_id
             
         return (
-            has_access(user, 'staff', course_key) or
+            bool(has_access(user, 'staff', course_key)) or
             CourseStaffRole(course_key).has_user(user)
         )
     except Exception:
