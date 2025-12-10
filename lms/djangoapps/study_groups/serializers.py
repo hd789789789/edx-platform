@@ -3,6 +3,7 @@ Serializers for Study Groups API.
 """
 
 from django.contrib.auth import get_user_model
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from openedx.core.djangoapps.user_api.accounts.serializers import UserReadOnlySerializer
 from openedx.core.lib.api.fields import ExpandableField
@@ -48,6 +49,31 @@ class StudyGroupMemberSerializer(serializers.ModelSerializer):
         model = StudyGroupMember
         fields = ('id', 'user', 'role', 'joined_at')
         read_only_fields = ('id', 'joined_at')
+
+
+class StudyGroupMemberCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating study group membership."""
+    
+    user = serializers.CharField(help_text="Username or email of the user to add")
+    
+    class Meta:
+        model = StudyGroupMember
+        fields = ('user', 'role')
+    
+    def validate_user(self, value):
+        """Validate and find user by username or email."""
+        from django.contrib.auth import get_user_model
+        from django.db.models import Q
+        
+        User = get_user_model()
+        try:
+            # Try to find user by username or email
+            user = User.objects.get(Q(username=value) | Q(email=value))
+            return user
+        except User.DoesNotExist:
+            raise serializers.ValidationError(_("User not found with username or email: {}").format(value))
+        except User.MultipleObjectsReturned:
+            raise serializers.ValidationError(_("Multiple users found with username or email: {}").format(value))
 
 
 class CommentAttachmentSerializer(serializers.ModelSerializer):

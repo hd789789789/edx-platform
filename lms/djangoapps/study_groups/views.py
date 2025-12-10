@@ -297,6 +297,13 @@ class StudyGroupMemberListView(ListCreateAPIView):
     permission_classes = (permissions.IsAuthenticated,)
     serializer_class = StudyGroupMemberSerializer
     
+    def get_serializer_class(self):
+        """Return appropriate serializer based on request method."""
+        if self.request.method == 'POST':
+            from .serializers import StudyGroupMemberCreateSerializer
+            return StudyGroupMemberCreateSerializer
+        return StudyGroupMemberSerializer
+    
     def get_queryset(self):
         """Get members of the study group."""
         group_id = self.kwargs.get('id')
