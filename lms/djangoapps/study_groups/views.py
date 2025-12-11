@@ -538,6 +538,24 @@ class StudyGroupCommentListView(ListCreateAPIView):
             return CommentCreateSerializer
         return StudyGroupCommentSerializer
     
+    def list(self, request, *args, **kwargs):
+        """Override list to log attachments."""
+        response = super().list(request, *args, **kwargs)
+        
+        # Log attachments in response for debugging
+        if response.data and 'results' in response.data:
+            for comment_data in response.data['results'][:3]:  # Log first 3 comments
+                comment_id = comment_data.get('id')
+                attachments = comment_data.get('attachments', [])
+                log.info('Comment in list response', extra={
+                    'comment_id': comment_id,
+                    'has_attachments_field': 'attachments' in comment_data,
+                    'attachments_count': len(attachments) if isinstance(attachments, list) else 0,
+                    'attachments_type': type(attachments).__name__,
+                })
+        
+        return response
+    
     def perform_create(self, serializer):
         """Create a new comment."""
         group_id = self.kwargs.get('id')
