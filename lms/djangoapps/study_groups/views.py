@@ -505,6 +505,12 @@ class StudyGroupCommentListView(ListCreateAPIView):
     pagination_class = CommentPagination
     serializer_class = StudyGroupCommentSerializer
     
+    def get_serializer_context(self):
+        """Add request to serializer context for file URLs."""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
     def get_queryset(self):
         """Get comments for the study group."""
         group_id = self.kwargs.get('id')
@@ -547,11 +553,26 @@ class StudyGroupCommentListView(ListCreateAPIView):
             for comment_data in response.data['results'][:3]:  # Log first 3 comments
                 comment_id = comment_data.get('id')
                 attachments = comment_data.get('attachments', [])
+                
+                # Also check the actual comment object from DB
+                try:
+                    from lms.djangoapps.study_groups.models import StudyGroupComment
+                    comment_obj = StudyGroupComment.objects.prefetch_related('attachments').get(id=comment_id)
+                    db_attachments_count = comment_obj.attachments.count()
+                    db_attachments = list(comment_obj.attachments.values('id', 'file_name', 'file_type'))
+                except Exception as e:
+                    db_attachments_count = -1
+                    db_attachments = []
+                    log.warning('Failed to get comment from DB', extra={'comment_id': comment_id, 'error': str(e)})
+                
                 log.info('Comment in list response', extra={
                     'comment_id': comment_id,
                     'has_attachments_field': 'attachments' in comment_data,
-                    'attachments_count': len(attachments) if isinstance(attachments, list) else 0,
+                    'attachments_count_in_response': len(attachments) if isinstance(attachments, list) else 0,
                     'attachments_type': type(attachments).__name__,
+                    'attachments_in_response': attachments[:2] if isinstance(attachments, list) and len(attachments) > 0 else [],
+                    'db_attachments_count': db_attachments_count,
+                    'db_attachments': db_attachments[:2],
                 })
         
         return response
