@@ -732,8 +732,20 @@ class CommentAttachmentView(APIView):
         except StudyGroupComment.DoesNotExist:
             raise Http404(_("Comment not found"))
         
-        # Check if user can edit this comment
-        if not can_user_edit_comment(self.request.user, comment):
+        # Check if user can view the group
+        if not can_user_view_group(self.request.user, comment.group):
+            raise PermissionDenied(_("You don't have permission to view this comment."))
+        
+        # Allow adding attachments if:
+        # 1. User is the comment owner, OR
+        # 2. User has staff privileges, OR
+        # 3. User can edit the comment (which includes owners)
+        user = self.request.user
+        is_owner = comment.user and comment.user.id == user.id
+        has_staff_privileges = has_course_staff_privileges(user, comment.group.course_id)
+        can_edit = can_user_edit_comment(user, comment)
+        
+        if not (is_owner or has_staff_privileges or can_edit):
             raise PermissionDenied(_("You don't have permission to add attachments to this comment."))
         
         return comment
