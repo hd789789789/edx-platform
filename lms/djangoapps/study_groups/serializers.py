@@ -44,11 +44,12 @@ class StudyGroupMemberSerializer(serializers.ModelSerializer):
         ),
         expanded_serializer=UserReadOnlySerializer(),
     )
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
     
     class Meta:
         model = StudyGroupMember
-        fields = ('id', 'user', 'role', 'joined_at')
-        read_only_fields = ('id', 'joined_at')
+        fields = ('id', 'user', 'user_id', 'role', 'joined_at')
+        read_only_fields = ('id', 'user_id', 'joined_at')
 
 
 class StudyGroupMemberCreateSerializer(serializers.ModelSerializer):
