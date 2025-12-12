@@ -4,7 +4,7 @@ Django models for Study Groups functionality.
 
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
 import pytz
 from django.contrib.auth import get_user_model
@@ -298,4 +298,125 @@ class CommentReaction(models.Model):
 
     def __str__(self):
         return f"{self.user.username} {self.reaction_type} on comment {self.comment.id}"
+
+
+class StudyGroupStreak(models.Model):
+    """
+    Model representing the streak of a study group.
+    Tracks how many consecutive days all members of the group have studied.
+    
+    .. no_pii:
+    """
+    
+    class Meta:
+        app_label = 'study_groups'
+        db_table = 'study_groups_studygroupstreak'
+        unique_together = (('group',),)
+        indexes = [
+            models.Index(fields=['group'], name='study_group_streak_group_idx'),
+            models.Index(fields=['last_day_of_streak'], name='study_group_streak_date_idx'),
+        ]
+
+    id = models.BigAutoField(primary_key=True)
+    group = models.OneToOneField(
+        StudyGroup,
+        on_delete=models.CASCADE,
+        related_name='streak'
+    )
+    streak_length = models.IntegerField(default=0)
+    last_day_of_streak = models.DateField(default=None, null=True, blank=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Streak for {self.group.name}: {self.streak_length} days"
+
+    def update_streak(self, today=None):
+        """
+        Update the group streak based on whether all members studied today.
+        Returns True if all members studied today, False otherwise.
+        """
+        from common.djangoapps.student.models import UserCelebration
+        
+        if today is None:
+            today = date.today()
+        
+        # Get all members of the group
+        members = self.group.members.all()
+        if not members.exists():
+            # No members, reset streak
+            self.streak_length = 0
+            self.last_day_of_streak = None
+            self.save()
+            return False
+        
+        # Check if all members studied today
+        all_studied_today = True
+        for member in members:
+            try:
+                celebration = UserCelebration.objects.get(user=member.user)
+                # Check if user studied today (last_day_of_streak == today)
+                if not celebration.last_day_of_streak or celebration.last_day_of_streak != today:
+                    all_studied_today = False
+                    break
+            except UserCelebration.DoesNotExist:
+                # User has no celebration record, meaning they haven't studied
+                all_studied_today = False
+                break
+        
+        if all_studied_today:
+            # All members studied today
+            # Check if this is a continuation of the streak
+            if self.last_day_of_streak:
+                # Check if yesterday was the last day (consecutive)
+                from datetime import timedelta
+                yesterday = today - timedelta(days=1)
+                if self.last_day_of_streak == yesterday:
+                    # Continue streak
+                    self.streak_length += 1
+                elif self.last_day_of_streak == today:
+                    # Already updated today, don't increment
+                    pass
+                else:
+                    # Gap in streak, reset
+                    self.streak_length = 1
+            else:
+                # First day of streak
+                self.streak_length = 1
+            
+            self.last_day_of_streak = today
+        else:
+            # Not all members studied today, reset streak
+            self.streak_length = 0
+            self.last_day_of_streak = None
+        
+        self.save()
+        return all_studied_today
+
+    def check_all_members_studied_today(self, today=None):
+        """
+        Check if all members of the group studied today.
+        Returns True if all members studied today, False otherwise.
+        """
+        from common.djangoapps.student.models import UserCelebration
+        
+        if today is None:
+            today = date.today()
+        
+        # Get all members of the group
+        members = self.group.members.all()
+        if not members.exists():
+            return False
+        
+        # Check if all members studied today
+        for member in members:
+            try:
+                celebration = UserCelebration.objects.get(user=member.user)
+                # Check if user studied today (last_day_of_streak == today)
+                if not celebration.last_day_of_streak or celebration.last_day_of_streak != today:
+                    return False
+            except UserCelebration.DoesNotExist:
+                # User has no celebration record, meaning they haven't studied
+                return False
+        
+        return True
 

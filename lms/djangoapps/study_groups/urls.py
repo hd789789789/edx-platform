@@ -16,6 +16,7 @@ from .views import (
     CommentReactionView,
     CommentAttachmentView,
     AttachmentDownloadView,
+    StudyGroupStreakListView,
 )
 
 urlpatterns = [
@@ -77,5 +78,12 @@ urlpatterns = [
         'attachments/<int:id>/download/',
         AttachmentDownloadView.as_view(),
         name='study-groups-attachments-download'
+    ),
+    
+    # Group Streaks endpoint
+    re_path(
+        r'^courses/{}/study-groups/streaks/$'.format(settings.COURSE_ID_PATTERN),
+        StudyGroupStreakListView.as_view(),
+        name='study-groups-streaks-list'
     ),
 ]

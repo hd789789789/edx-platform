@@ -15,6 +15,7 @@ from .models import (
     StudyGroupComment,
     CommentAttachment,
     CommentReaction,
+    StudyGroupStreak,
 )
 
 User = get_user_model()
@@ -370,4 +371,75 @@ class ReactionCreateSerializer(serializers.ModelSerializer):
             user=request.user,
             reaction_type=reaction_type
         )
+
+
+class StudyGroupStreakSerializer(serializers.Serializer):
+    """Serializer for study group streak information."""
+    
+    id = serializers.SerializerMethodField()
+    name = serializers.SerializerMethodField()
+    streakDays = serializers.IntegerField(source='streak_length')
+    members = serializers.SerializerMethodField()
+    additionalMembers = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+    message = serializers.SerializerMethodField()
+    
+    def get_id(self, obj):
+        """Get group ID."""
+        return obj.group.id
+    
+    def get_name(self, obj):
+        """Get group name."""
+        return obj.group.name
+    
+    def get_members(self, obj):
+        """Get first 3 members for display."""
+        from datetime import date
+        from common.djangoapps.student.models import UserCelebration
+        
+        members = obj.group.members.all()[:3]
+        today = date.today()
+        result = []
+        
+        for member in members:
+            # Get user's initial
+            user = member.user
+            initial = (user.first_name[0] if user.first_name else '') + (user.last_name[0] if user.last_name else '')
+            if not initial:
+                initial = user.username[0:2].upper()
+            
+            # Generate color based on user ID
+            num = (user.id or 1) * 2654435761
+            # Convert to unsigned 32-bit integer and extract RGB
+            num_unsigned = num & 0xFFFFFFFF
+            color_hex = format(num_unsigned, '06x')[:6]
+            color = f"#{color_hex}"
+            
+            result.append({
+                'id': user.id,
+                'initial': initial,
+                'color': color,
+            })
+        
+        return result
+    
+    def get_additionalMembers(self, obj):
+        """Get count of additional members beyond the first 3."""
+        total = obj.group.members.count()
+        return max(0, total - 3)
+    
+    def get_status(self, obj):
+        """Get status: 'all_completed' if all members studied today, 'in_progress' otherwise."""
+        from datetime import date
+        today = date.today()
+        if obj.check_all_members_studied_today(today):
+            return 'all_completed'
+        return 'in_progress'
+    
+    def get_message(self, obj):
+        """Get message based on status."""
+        status = self.get_status(obj)
+        if status == 'all_completed':
+            return '✓ Tất cả thành viên đã học hôm nay'
+        return '💪 Tiếp tục học hôm nay để giữ chuỗi nhóm!'
 

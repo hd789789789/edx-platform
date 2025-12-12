@@ -39,6 +39,7 @@ from .models import (
     StudyGroupComment,
     CommentAttachment,
     CommentReaction,
+    StudyGroupStreak,
 )
 from .permissions import (
     can_user_create_group,
@@ -64,6 +65,7 @@ from .serializers import (
     CommentAttachmentSerializer,
     ReactionCreateSerializer,
     CommentReactionSerializer,
+    StudyGroupStreakSerializer,
 )
 
 log = logging.getLogger(__name__)
@@ -924,4 +926,72 @@ class AttachmentDownloadView(RetrieveAPIView):
         except Exception as e:
             log.error(f"Error downloading attachment {attachment.id}: {str(e)}")
             raise Http404(_("Error downloading file"))
+
+
+class StudyGroupStreakListView(APIView):
+    """
+    Get group streaks for all study groups the user is a member of in a course.
+    
+    GET /api/courses/{course_id}/study-groups/streaks/
+    """
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+    
+    def get(self, request, *args, **kwargs):
+        """Get group streaks for user's study groups in the course."""
+        from datetime import date
+        from opaque_keys.edx.keys import CourseKey
+        
+        course_id = kwargs.get('course_id')
+        user = request.user
+        
+        log.info('Getting group streaks', extra={
+            'course_id': course_id,
+            'user_id': user.id,
+        })
+        
+        try:
+            course_key = CourseKey.from_string(course_id)
+        except InvalidKeyError:
+            return Response(
+                {'error': _("Invalid course ID")},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get all study groups the user is a member of in this course
+        user_groups = StudyGroup.objects.filter(
+            course_id=course_key,
+            members__user=user
+        ).distinct()
+        
+        today = date.today()
+        group_streaks = []
+        
+        for group in user_groups:
+            # Get or create streak for this group
+            streak, created = StudyGroupStreak.objects.get_or_create(group=group)
+            
+            # Update streak based on today's activity
+            streak.update_streak(today)
+            
+            # Refresh from DB to get updated values
+            streak.refresh_from_db()
+            
+            # Serialize the streak object directly
+            serializer = StudyGroupStreakSerializer(streak, context={'request': request})
+            group_streaks.append(serializer.data)
+        
+        log.info('Group streaks retrieved', extra={
+            'course_id': course_id,
+            'user_id': user.id,
+            'count': len(group_streaks),
+        })
+        
+        return Response({
+            'success': True,
+            'groups': group_streaks,
+        })
 
