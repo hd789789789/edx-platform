@@ -110,7 +110,8 @@ def can_user_create_group(user, course_id):
     if not user or not user.is_authenticated or not course_id:
         return False
     try:
-        return CourseEnrollment.is_enrolled(user, course_id) or has_course_staff_privileges(user, course_id)
+        course_key = CourseKey.from_string(course_id) if isinstance(course_id, str) else course_id
+        return CourseEnrollment.is_enrolled(user, course_key) or has_course_staff_privileges(user, course_key)
     except Exception:
         return False
 
