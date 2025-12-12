@@ -37,3 +37,4 @@ if __name__ == "__main__":
         print(f"\n✗ Error applying migration: {e}")
         sys.exit(1)
 
+

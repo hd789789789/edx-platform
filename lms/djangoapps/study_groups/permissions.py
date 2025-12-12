@@ -98,7 +98,7 @@ def is_course_staff(user, course_id):
 def can_user_create_group(user, course_id):
     """
     Check if user can create a study group.
-    Only Admin and Staff can create groups.
+    Cho phép tất cả người học đã đăng nhập và đã ghi danh khóa học tạo nhóm.
     
     Args:
         user: The user to check
@@ -107,13 +107,18 @@ def can_user_create_group(user, course_id):
     Returns:
         bool: True if user can create groups
     """
-    return has_course_staff_privileges(user, course_id)
+    if not user or not user.is_authenticated or not course_id:
+        return False
+    try:
+        return CourseEnrollment.is_enrolled(user, course_id) or has_course_staff_privileges(user, course_id)
+    except Exception:
+        return False
 
 
 def can_user_edit_group(user, group):
     """
     Check if user can edit a study group.
-    Admin and Staff can edit any group, members cannot.
+    Admin/Staff hoặc chính người tạo (owner) có thể sửa.
     
     Args:
         user: The user to check
@@ -122,13 +127,18 @@ def can_user_edit_group(user, group):
     Returns:
         bool: True if user can edit the group
     """
-    return has_course_staff_privileges(user, group.course_id)
+    if not user or not user.is_authenticated or not group:
+        return False
+    return (
+        has_course_staff_privileges(user, group.course_id) or
+        (group.created_by_id and group.created_by_id == user.id)
+    )
 
 
 def can_user_delete_group(user, group):
     """
     Check if user can delete a study group.
-    Only Admin and Staff can delete groups.
+    Admin/Staff hoặc người tạo (owner) có thể xóa.
     
     Args:
         user: The user to check
@@ -137,13 +147,18 @@ def can_user_delete_group(user, group):
     Returns:
         bool: True if user can delete the group
     """
-    return has_course_staff_privileges(user, group.course_id)
+    if not user or not user.is_authenticated or not group:
+        return False
+    return (
+        has_course_staff_privileges(user, group.course_id) or
+        (group.created_by_id and group.created_by_id == user.id)
+    )
 
 
 def can_user_manage_members(user, group):
     """
     Check if user can add/remove members from a study group.
-    Only Admin and Staff can manage members.
+    Admin/Staff hoặc người tạo (owner) có thể quản lý thành viên.
     
     Args:
         user: The user to check
@@ -152,7 +167,12 @@ def can_user_manage_members(user, group):
     Returns:
         bool: True if user can manage members
     """
-    return has_course_staff_privileges(user, group.course_id)
+    if not user or not user.is_authenticated or not group:
+        return False
+    return (
+        has_course_staff_privileges(user, group.course_id) or
+        (group.created_by_id and group.created_by_id == user.id)
+    )
 
 
 def can_user_view_group(user, group):

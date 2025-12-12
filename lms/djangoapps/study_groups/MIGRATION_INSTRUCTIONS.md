@@ -55,3 +55,4 @@ StudyGroupStreak.objects.all()
 - Bảng sẽ được tạo tự động khi có StudyGroup mới (thông qua `get_or_create`)
 - Không cần dữ liệu khởi tạo, bảng sẽ được populate tự động khi API được gọi
 
+
