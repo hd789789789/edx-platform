@@ -16,6 +16,7 @@ from django.views.generic import View
 from opaque_keys.edx.keys import CourseKey
 from web_fragments.fragment import Fragment
 
+from django.conf import settings
 from lms.djangoapps.courseware.courses import get_course_with_access
 from openedx.core.djangoapps.plugin_api.views import EdxFragmentView
 from openedx.core.djangoapps.user_api.models import UserPreference
@@ -73,11 +74,13 @@ class CourseBookmarksFragmentView(EdxFragmentView):
 
         language = UserPreference.get_value(request.user, 'pref-lang', default='en')
 
+        learning_mfe_url = getattr(settings, 'LEARNING_MICROFRONTEND_URL', None)
         context = {
             'csrf': csrf(request)['csrf_token'],
             'course': course,
             'bookmarks_api_url': reverse('bookmarks'),
             'language_preference': language,
+            'learning_mfe_url': learning_mfe_url or '',
         }
         html = render_to_string('course_bookmarks/course-bookmarks-fragment.html', context)
         inline_js = render_to_string('course_bookmarks/course_bookmarks_js.template', context)

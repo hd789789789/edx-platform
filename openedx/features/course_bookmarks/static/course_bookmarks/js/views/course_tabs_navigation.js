@@ -12,6 +12,9 @@
         var CourseTabsNavigation = function(options) {
             this.courseId = options.courseId;
             this.$container = options.$container;
+            this.learningMfeUrl = options.learningMfeUrl || 'https://apps.pistudy.vn/learning';
+            // Ensure learningMfeUrl doesn't have trailing slash
+            this.learningMfeUrl = this.learningMfeUrl.replace(/\/$/, '');
             // Bookmarks is not a tab, so no tab should be active
             // Or we can make outline tab active by default
             this.activeTabSlug = null; // No active tab for bookmarks page
@@ -48,18 +51,20 @@
             normalizeTabs: function(tabs) {
                 var self = this;
                 var courseId = this.courseId;
+                var learningMfeUrl = this.learningMfeUrl;
                 
                 // Process tabs similar to LoadedTabPage.jsx
+                // Use full URL with learning MFE domain
                 var welcomeTab = {
                     title: '👋 Chào mừng',
                     slug: 'welcome',
-                    url: '/learning/course/' + courseId + '/welcome'
+                    url: learningMfeUrl + '/course/' + courseId + '/welcome'
                 };
 
                 var badgeTab = {
                     title: '🏅 Thành tích',
                     slug: 'badge',
-                    url: '/learning/course/' + courseId + '/badge'
+                    url: learningMfeUrl + '/course/' + courseId + '/badge'
                 };
 
                 // Filter and map tabs
@@ -73,25 +78,83 @@
                         var slug = tab.tab_id === 'courseware' ? 'outline' : tab.tab_id;
                         var title = tab.title;
                         var url = tab.url;
+                        var learningMfeUrl = self.learningMfeUrl;
+
+                        // Helper function to convert URL to learning MFE URL
+                        var convertToLearningMfeUrl = function(originalUrl, defaultPath) {
+                            if (!originalUrl) {
+                                return learningMfeUrl + '/course/' + courseId + defaultPath;
+                            }
+                            
+                            // If already absolute URL with learning MFE domain, return as is
+                            if (originalUrl.startsWith(learningMfeUrl)) {
+                                return originalUrl;
+                            }
+                            
+                            // If absolute URL (http/https), extract path and convert
+                            if (originalUrl.startsWith('http://') || originalUrl.startsWith('https://')) {
+                                try {
+                                    // Extract path from URL
+                                    var urlObj = new URL(originalUrl);
+                                    var path = urlObj.pathname;
+                                    
+                                    // Convert /courses/... to /learning/course/...
+                                    if (path.includes('/courses/')) {
+                                        path = path.replace(/\/courses\/([^\/]+)/, '/course/$1');
+                                        // Add learning prefix if needed
+                                        if (!path.startsWith('/learning/')) {
+                                            path = '/learning' + path;
+                                        }
+                                    } else if (path.startsWith('/course/')) {
+                                        // Already in /course/ format, just add /learning prefix if needed
+                                        if (!path.startsWith('/learning/')) {
+                                            path = '/learning' + path;
+                                        }
+                                    }
+                                    
+                                    return learningMfeUrl + path;
+                                } catch (e) {
+                                    // If URL parsing fails, use default path
+                                    return learningMfeUrl + '/course/' + courseId + defaultPath;
+                                }
+                            }
+                            
+                            // If relative URL starting with /learning/, use learning MFE URL
+                            if (originalUrl.startsWith('/learning/')) {
+                                return learningMfeUrl + originalUrl.substring('/learning'.length);
+                            }
+                            
+                            // If relative URL starting with /course/, use learning MFE URL
+                            if (originalUrl.startsWith('/course/')) {
+                                return learningMfeUrl + originalUrl;
+                            }
+                            
+                            // If relative URL starting with /courses/, convert it
+                            if (originalUrl.startsWith('/courses/')) {
+                                var convertedPath = originalUrl.replace(/\/courses\/([^\/]+)/, '/course/$1');
+                                return learningMfeUrl + convertedPath;
+                            }
+                            
+                            // Default: use learning MFE URL with default path
+                            return learningMfeUrl + '/course/' + courseId + defaultPath;
+                        };
 
                         // Update title for outline tab
                         if (slug === 'outline') {
                             title = '📚 Khóa học';
+                            url = convertToLearningMfeUrl(url, '/home');
                         }
 
-                        // Update title for leaderboard tab
+                        // Update title and URL for leaderboard tab
                         if (slug === 'leaderboard') {
                             title = '🏆 Xếp hạng';
+                            url = convertToLearningMfeUrl(url, '/leaderboard');
                         }
 
                         // Update teams tab
                         if (slug === 'teams') {
                             title = 'Nhóm';
-                            if (url && url.includes('/courses/') && url.includes('/teams_dashboard')) {
-                                url = '/learning/course/' + courseId + '/teams';
-                            } else if (!url || (!url.includes('/learning/') && !url.includes('/course/'))) {
-                                url = '/learning/course/' + courseId + '/teams';
-                            }
+                            url = convertToLearningMfeUrl(url, '/teams');
                         }
 
                         return {
@@ -185,7 +248,8 @@
                     return;
                 }
                 // If no existing navigation, show minimal tabs
-                this.$container.html('<div class="course-tabs-navigation mb-3"><div class="container-xl"><nav class="nav flex-nowrap nav-underline-tabs"><a href="/learning/course/' + this.courseId + '/home" class="nav-item flex-shrink-0 nav-link">📚 Khóa học</a></nav></div></div>');
+                var learningMfeUrl = this.learningMfeUrl;
+                this.$container.html('<div class="course-tabs-navigation mb-3"><div class="container-xl"><nav class="nav flex-nowrap nav-underline-tabs"><a href="' + learningMfeUrl + '/course/' + this.courseId + '/home" class="nav-item flex-shrink-0 nav-link">📚 Khóa học</a></nav></div></div>');
             }
         };
 

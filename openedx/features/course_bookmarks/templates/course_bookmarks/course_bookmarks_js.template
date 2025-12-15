@@ -19,9 +19,11 @@ from openedx.core.djangolib.js_utils import dump_js_escaped_json, js_escaped_str
         });
         
         // Initialize course tabs navigation
+        var learningMfeUrl = '${learning_mfe_url | n, js_escaped_string}';
         new CourseTabsNavigation({
             courseId: courseId,
-            $container: $('#course-tabs-navigation-container')
+            $container: $('#course-tabs-navigation-container'),
+            learningMfeUrl: learningMfeUrl || 'https://apps.pistudy.vn/learning'
         });
     });
 }).call(this, require || RequireJS.require, define || RequireJS.define);
