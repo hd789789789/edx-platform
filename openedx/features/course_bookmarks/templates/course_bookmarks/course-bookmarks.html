@@ -25,10 +25,77 @@ from openedx.features.course_experience import course_home_page_title
 
 <%block name="pagetitle">${course_name()}</%block>
 
-<%include file="../courseware/course_navigation.html" args="active_page='courseware'" />
+## Container for course tabs navigation (will be populated by JavaScript)
+<div id="course-tabs-navigation-container"></div>
 
 <%block name="head_extra">
 ${HTML(bookmarks_fragment.head_html())}
+<style>
+/* Course Tabs Navigation Styles - matching app-learning */
+.course-tabs-navigation {
+    position: relative;
+    border-bottom: solid 1px #eaeaea;
+    margin-bottom: 1rem;
+}
+
+.course-tabs-navigation .nav a,
+.course-tabs-navigation .nav button {
+    transition: background-color 0.2s;
+}
+
+.course-tabs-navigation .nav a:hover,
+.course-tabs-navigation .nav button:hover {
+    background-color: #f5f5f5;
+}
+
+.course-tabs-navigation .nav a {
+    border-bottom: 4px solid transparent;
+    border-top: 4px solid transparent;
+    color: #6c757d;
+    padding: 0.5rem 1rem;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.course-tabs-navigation .nav a:not(.active):hover {
+    background-color: #f5f5f5;
+    border-bottom: none;
+}
+
+.course-tabs-navigation .nav a.active {
+    font-weight: 400;
+    color: #0056b3;
+    border-bottom-color: #0056b3;
+}
+
+.course-tabs-navigation .nav-bar {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.course-tabs-navigation .nav-menu {
+    flex: 1;
+}
+
+.course-tabs-navigation .nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+
+.course-tabs-navigation .nav-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.course-tabs-navigation .container-xl {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 0 15px;
+}
+</style>
 </%block>
 
 <%block name="footer_extra">
