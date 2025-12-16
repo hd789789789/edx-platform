@@ -154,6 +154,7 @@ class StudyGroupCommentSerializer(serializers.ModelSerializer):
     reaction_counts = serializers.SerializerMethodField()
     user_reaction = serializers.SerializerMethodField()
     replies_count = serializers.SerializerMethodField()
+    replies = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
     can_delete = serializers.SerializerMethodField()
     
@@ -162,7 +163,7 @@ class StudyGroupCommentSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'group', 'user', 'parent_comment', 'content',
             'created_at', 'updated_at', 'attachments', 'reactions',
-            'reaction_counts', 'user_reaction', 'replies_count',
+            'reaction_counts', 'user_reaction', 'replies_count', 'replies',
             'can_edit', 'can_delete'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
@@ -186,6 +187,14 @@ class StudyGroupCommentSerializer(serializers.ModelSerializer):
     def get_replies_count(self, obj):
         """Get the number of replies to this comment."""
         return obj.replies.count()
+    
+    def get_replies(self, obj):
+        """Get replies to this comment."""
+        replies = obj.replies.all().select_related('user').prefetch_related(
+            'attachments',
+            'reactions__user'
+        ).order_by('created_at')
+        return StudyGroupCommentSerializer(replies, many=True, context=self.context).data
     
     def get_can_edit(self, obj):
         """Check if current user can edit this comment."""
