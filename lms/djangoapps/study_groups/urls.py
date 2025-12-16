@@ -15,6 +15,7 @@ from .views import (
     StudyGroupCommentDetailView,
     CommentReactionView,
     CommentAttachmentView,
+    CommentAttachmentDetailView,
     AttachmentDownloadView,
     StudyGroupStreakListView,
 )
