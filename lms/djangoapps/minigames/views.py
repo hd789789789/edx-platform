@@ -8,9 +8,11 @@ from edx_rest_framework_extensions.auth.session.authentication import SessionAut
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
 from rest_framework import permissions
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import MinigameLog
-from .serializers import MinigameLogSerializer
+from .serializers import MinigameHighScoreSerializer, MinigameLogSerializer
 
 
 def _generate_key(user_str: str, tsms: int, payload) -> str:
@@ -24,7 +26,8 @@ def _generate_key(user_str: str, tsms: int, payload) -> str:
         'tsms': tsms,
         'payload': payload,
     }
-    msg = json.dumps(base, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    msg = json.dumps(base, sort_keys=True,
+                     separators=(',', ':')).encode('utf-8')
     return hmac.new(secret, msg, hashlib.sha256).hexdigest()
 
 
@@ -94,3 +97,70 @@ class MinigameLogDetailView(RetrieveUpdateDestroyAPIView):
         return MinigameLog.objects.filter(user=user_str)
 
 
+class MinigameHighScoreView(APIView):
+    """
+    Trả về điểm cao nhất của từng user cho từng minigame.
+    - GET /api/minigames/highscores/
+    - GET /api/minigames/highscores/?gameKey=<key>
+    Nếu không phải staff, API chỉ trả dữ liệu của user hiện tại.
+    """
+
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        game_key = request.query_params.get('gameKey')
+        queryset = MinigameLog.objects.filter(msgtype='RESULT')
+
+        if game_key:
+            queryset = queryset.filter(payload__gameKey=game_key)
+
+        user = request.user
+        if not (user and user.is_staff):
+            user_str = str(user.id) if user and user.is_authenticated else ''
+            queryset = queryset.filter(user=user_str)
+
+        highscores = {}
+        for log in queryset.iterator():
+            payload = log.payload or {}
+            gkey = payload.get('gameKey')
+            if not gkey:
+                continue
+
+            score_raw = payload.get('score')
+            if score_raw is None:
+                score_raw = payload.get('bestScore')
+            if score_raw is None:
+                score_raw = payload.get('lastScore')
+
+            try:
+                score_val = float(score_raw)
+            except (TypeError, ValueError):
+                continue
+
+            key = (log.user, gkey)
+            existing = highscores.get(key)
+            if (
+                existing is None
+                or score_val > existing['best_score']
+                or (score_val == existing['best_score'] and log.tsms > existing['last_updated'])
+            ):
+                highscores[key] = {
+                    'user': log.user,
+                    'gameKey': gkey,
+                    'best_score': score_val,
+                    'username': payload.get('username'),
+                    'email': payload.get('email'),
+                    'last_updated': log.tsms,
+                }
+
+        data = list(highscores.values())
+        data.sort(
+            key=lambda item: (-item['best_score'], item['gameKey'], item['user']))
+
+        serializer = MinigameHighScoreSerializer(data=data, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)

@@ -26,3 +26,14 @@ class MinigameLogSerializer(serializers.ModelSerializer):
         read_only_fields = ('msgid', 'key', 'user')
 
 
+class MinigameHighScoreSerializer(serializers.Serializer):
+    """
+    Serializer cho dữ liệu high score đã được tính sẵn.
+    """
+
+    user = serializers.CharField()
+    gameKey = serializers.CharField()
+    best_score = serializers.FloatField()
+    username = serializers.CharField(allow_null=True, required=False)
+    email = serializers.EmailField(allow_null=True, required=False)
+    last_updated = serializers.IntegerField()
