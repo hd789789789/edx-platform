@@ -102,7 +102,7 @@ class MinigameHighScoreView(APIView):
     Trả về điểm cao nhất của từng user cho từng minigame.
     - GET /api/minigames/highscores/
     - GET /api/minigames/highscores/?gameKey=<key>
-    Nếu không phải staff, API chỉ trả dữ liệu của user hiện tại.
+    Dùng cho leaderboard nên user thường cũng xem được toàn bộ.
     """
 
     authentication_classes = (
@@ -117,11 +117,6 @@ class MinigameHighScoreView(APIView):
 
         if game_key:
             queryset = queryset.filter(payload__gameKey=game_key)
-
-        user = request.user
-        if not (user and user.is_staff):
-            user_str = str(user.id) if user and user.is_authenticated else ''
-            queryset = queryset.filter(user=user_str)
 
         highscores = {}
         for log in queryset.iterator():
