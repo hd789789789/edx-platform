@@ -26,6 +26,8 @@ class MinigameLog(models.Model):
     class Meta:
         db_table = 'minigame_logs'
         ordering = ['-tsms']
+        # Giúp Django nhận diện app ngay cả khi settings đặc biệt (như tutor.i18n)
+        app_label = 'minigames'
 
     def __str__(self):
         return f'MinigameLog(msgid={self.msgid}, user={self.user}, msgtype={self.msgtype})'
