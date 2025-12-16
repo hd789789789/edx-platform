@@ -791,6 +791,14 @@ class CommentAttachmentView(APIView):
         
         return comment
     
+    def _delete_file(self, file_field):
+        """Safely delete file from storage if exists."""
+        try:
+            if file_field and file_field.name and file_field.storage.exists(file_field.name):
+                file_field.storage.delete(file_field.name)
+        except Exception:
+            log.warning('Failed to delete attachment file from storage', exc_info=True)
+    
     def get_file_type(self, filename):
         """Determine file type from extension."""
         ext = os.path.splitext(filename.lower())[1]
@@ -886,6 +894,100 @@ class CommentAttachmentView(APIView):
         )
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class CommentAttachmentDetailView(APIView):
+    """
+    Retrieve, delete or replace a comment attachment.
+    
+    DELETE /api/comments/attachments/{id}/
+    PUT/PATCH /api/comments/attachments/{id}/ (re-upload file)
+    """
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+    parser_classes = (MultiPartParser, FormParser)
+
+    def get_object(self, request, attachment_id):
+        try:
+            attachment = CommentAttachment.objects.select_related('comment', 'comment__group', 'comment__user').get(id=attachment_id)
+        except CommentAttachment.DoesNotExist:
+            raise Http404(_("Comment attachment not found"))
+
+        comment = attachment.comment
+        user = request.user
+        # Permission: owner of comment or staff or can edit comment
+        if not (can_user_edit_comment(user, comment) or has_course_staff_privileges(user, comment.group.course_id)):
+            raise PermissionDenied(_("You don't have permission to modify this attachment."))
+        return attachment
+
+    def delete(self, request, id):
+        attachment = self.get_object(request, id)
+        log.info('Deleting comment attachment', extra={
+            'attachment_id': id,
+            'comment_id': attachment.comment_id,
+            'user_id': request.user.id,
+        })
+        try:
+            if attachment.file_path and attachment.file_path.name and attachment.file_path.storage.exists(attachment.file_path.name):
+                attachment.file_path.storage.delete(attachment.file_path.name)
+        except Exception:
+            log.warning('Failed to delete attachment file from storage', exc_info=True)
+        attachment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def put(self, request, id):
+        """
+        Replace an attachment file with a new one.
+        """
+        attachment = self.get_object(request, id)
+        user = request.user
+        comment = attachment.comment
+
+        if 'file' not in request.FILES:
+            return Response({'error': _("No file provided")}, status=status.HTTP_400_BAD_REQUEST)
+
+        file_obj = request.FILES['file']
+        file_name = file_obj.name
+
+        # Reuse validation from CommentAttachmentView
+        uploader = CommentAttachmentView()
+        uploader.request = request
+        file_type = uploader.get_file_type(file_name)
+        try:
+          uploader.validate_file(file_obj, file_type)
+        except ValidationError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        log.info('Replacing attachment file', extra={
+            'attachment_id': id,
+            'comment_id': comment.id,
+            'user_id': user.id,
+            'file_name': file_name,
+            'file_type': file_type,
+            'file_size': file_obj.size,
+        })
+
+        # Delete old file in storage
+        try:
+            if attachment.file_path and attachment.file_path.name and attachment.file_path.storage.exists(attachment.file_path.name):
+                attachment.file_path.storage.delete(attachment.file_path.name)
+        except Exception:
+            log.warning('Failed to delete old attachment file from storage', exc_info=True)
+
+        # Save new file
+        attachment.file_path.save(file_name, file_obj, save=True)
+        attachment.file_name = file_name
+        attachment.file_type = file_type or attachment.file_type
+        attachment.file_size = file_obj.size
+        attachment.save(update_fields=['file_path', 'file_name', 'file_type', 'file_size', 'uploaded_at'])
+
+        serializer = CommentAttachmentSerializer(attachment, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    patch = put
 
 
 class AttachmentDownloadView(RetrieveAPIView):

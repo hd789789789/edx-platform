@@ -75,6 +75,11 @@ urlpatterns = [
         name='study-groups-comments-attachments'
     ),
     path(
+        'comments/attachments/<int:id>/',
+        CommentAttachmentDetailView.as_view(),
+        name='study-groups-comments-attachments-detail'
+    ),
+    path(
         'attachments/<int:id>/download/',
         AttachmentDownloadView.as_view(),
         name='study-groups-attachments-download'
