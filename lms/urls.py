@@ -206,8 +206,15 @@ urlpatterns = [
             namespace='api_experiments',
         ),
     ),
-    path('api/discounts/', include(('openedx.features.discounts.urls', 'openedx.features.discounts'),
-                                   namespace='api_discounts')),
+    path(
+        'api/minigames/',
+        include(('lms.djangoapps.minigames.urls', 'lms.djangoapps.minigames'), namespace='minigames_api'),
+    ),
+    path(
+        'api/discounts/',
+        include(('openedx.features.discounts.urls', 'openedx.features.discounts'),
+                namespace='api_discounts'),
+    ),
 
     # Provide URLs where we can see the rendered error pages without having to force an error.
     path('403', handler403, name='render_403'),
