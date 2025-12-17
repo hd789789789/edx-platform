@@ -37,3 +37,15 @@ class MinigameHighScoreSerializer(serializers.Serializer):
     username = serializers.CharField(allow_null=True, required=False)
     email = serializers.EmailField(allow_null=True, required=False)
     last_updated = serializers.IntegerField()
+
+
+class MinigameUserStatsSerializer(serializers.Serializer):
+    """
+    Serializer cho thống kê tổng hợp của user.
+    """
+
+    total_xp = serializers.IntegerField()
+    total_coins = serializers.IntegerField()
+    level = serializers.IntegerField()
+    xp_current = serializers.IntegerField()
+    xp_required = serializers.IntegerField()
