@@ -6,7 +6,7 @@ from django.conf import settings
 from django.utils import timezone
 from edx_rest_framework_extensions.auth.session.authentication import SessionAuthenticationAllowInactiveUser
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
-from rest_framework import permissions
+from rest_framework import permissions, status
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -350,32 +350,35 @@ class QuestionPoolListCreateView(ListCreateAPIView):
         if not mate_id:
             # Không có mate_id thì fallback tạo bình thường (sẽ bị validate fail nếu model yêu cầu)
             serializer.save()
-            return
 
-        try:
-            existing = QuestionPool.objects.get(mate_id=mate_id)
-            # Nếu đã bị soft-delete -> cập nhật và tái sử dụng
-            if existing.status == 0:
-                existing.cat_list = serializer.validated_data.get(
-                    'cat_list', existing.cat_list)
-                existing.mate_meta = serializer.validated_data.get(
-                    'mate_meta', existing.mate_meta)
-                existing.mate_content = serializer.validated_data.get(
-                    'mate_content', existing.mate_content)
-                # Nếu client gửi status thì dùng, ngược lại mặc định bật active (1)
-                existing.status = serializer.validated_data.get('status', 1)
-                existing.save()
-                # Gán instance để DRF trả về object đã cập nhật
-                serializer.instance = existing
-            else:
-                # Đã tồn tại và active -> báo lỗi trùng
-                from rest_framework.exceptions import ValidationError
+    def create(self, request, *args, **kwargs):
+        """
+        Override create to handle case where mate_id exists but is soft-deleted.
+        We must check for existing soft-deleted record before running serializer validation
+        (which would raise uniqueness error). If found and status==0, perform update.
+        """
+        mate_id = request.data.get('mate_id')
+        if mate_id:
+            try:
+                existing = QuestionPool.objects.get(mate_id=mate_id)
+                # If exists and soft-deleted -> update and return
+                if existing.status == 0:
+                    serializer = self.get_serializer(
+                        existing, data=request.data)
+                    serializer.is_valid(raise_exception=True)
+                    serializer.save()
+                    return Response(serializer.data, status=status.HTTP_200_OK)
+                else:
+                    from rest_framework.exceptions import ValidationError
 
-                raise ValidationError(
-                    {'mate_id': ['question pool có mate id đã tồn tại.']})
-        except QuestionPool.DoesNotExist:
-            # Không tồn tại -> tạo mới bình thường
-            serializer.save()
+                    raise ValidationError(
+                        {'mate_id': ['question pool có mate id đã tồn tại.']})
+            except QuestionPool.DoesNotExist:
+                # Not exists -> proceed to normal create flow
+                pass
+
+        return super().create(request, *args, **kwargs)
+        pass
 
 
 class QuestionPoolDetailView(RetrieveUpdateDestroyAPIView):
