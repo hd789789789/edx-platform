@@ -339,6 +339,44 @@ class QuestionPoolListCreateView(ListCreateAPIView):
 
         return queryset
 
+    def perform_create(self, serializer):
+        """
+        Khi tạo mới: nếu có record cùng `mate_id` đã bị soft-delete (status == 0)
+        thì tái sử dụng record đó (cập nhật các field và set status theo request),
+        tránh lỗi duplicate key trên primary key.
+        Nếu record tồn tại và status > 0 thì trả về ValidationError.
+        """
+        mate_id = serializer.validated_data.get('mate_id')
+        if not mate_id:
+            # Không có mate_id thì fallback tạo bình thường (sẽ bị validate fail nếu model yêu cầu)
+            serializer.save()
+            return
+
+        try:
+            existing = QuestionPool.objects.get(mate_id=mate_id)
+            # Nếu đã bị soft-delete -> cập nhật và tái sử dụng
+            if existing.status == 0:
+                existing.cat_list = serializer.validated_data.get(
+                    'cat_list', existing.cat_list)
+                existing.mate_meta = serializer.validated_data.get(
+                    'mate_meta', existing.mate_meta)
+                existing.mate_content = serializer.validated_data.get(
+                    'mate_content', existing.mate_content)
+                # Nếu client gửi status thì dùng, ngược lại mặc định bật active (1)
+                existing.status = serializer.validated_data.get('status', 1)
+                existing.save()
+                # Gán instance để DRF trả về object đã cập nhật
+                serializer.instance = existing
+            else:
+                # Đã tồn tại và active -> báo lỗi trùng
+                from rest_framework.exceptions import ValidationError
+
+                raise ValidationError(
+                    {'mate_id': ['question pool có mate id đã tồn tại.']})
+        except QuestionPool.DoesNotExist:
+            # Không tồn tại -> tạo mới bình thường
+            serializer.save()
+
 
 class QuestionPoolDetailView(RetrieveUpdateDestroyAPIView):
     """
@@ -368,3 +406,11 @@ class QuestionPoolDetailView(RetrieveUpdateDestroyAPIView):
         """
         instance.status = 0
         instance.save()
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Override default destroy to return a success message after soft-delete.
+        """
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response({'detail': 'Successfully'})
