@@ -12,8 +12,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 import math
 
-from .models import MinigameLog
-from .serializers import MinigameHighScoreSerializer, MinigameLogSerializer, MinigameUserStatsSerializer
+from .models import MinigameLog, QuestionPool
+from .serializers import (
+    MinigameHighScoreSerializer,
+    MinigameLogSerializer,
+    MinigameUserStatsSerializer,
+    QuestionPoolSerializer,
+    QuestionPoolMateIdSerializer,
+)
 
 
 def _generate_key(user_str: str, tsms: int, payload) -> str:
@@ -278,3 +284,87 @@ class MinigameUserStatsView(APIView):
         serializer = MinigameUserStatsSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         return Response(serializer.data)
+
+
+class QuestionPoolMateIdListView(APIView):
+    """
+    API lấy danh sách tất cả mate_id.
+
+    GET /api/minigames/question-pool/mate-ids/
+    """
+
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        """
+        Trả về danh sách tất cả mate_id với status != 0 (không bị xóa).
+        """
+        mate_ids = QuestionPool.objects.filter(
+            status__gt=0).values_list('mate_id', flat=True)
+        data = [{'mate_id': mate_id} for mate_id in mate_ids]
+
+        serializer = QuestionPoolMateIdSerializer(data=data, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
+
+
+class QuestionPoolListCreateView(ListCreateAPIView):
+    """
+    List hoặc tạo question pool entry.
+
+    GET  /api/minigames/question-pool/        -> danh sách tất cả (hoặc theo mate_id nếu có query param)
+    POST /api/minigames/question-pool/        -> tạo entry mới
+    """
+
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = QuestionPoolSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = QuestionPool.objects.filter(
+            status__gt=0)  # Chỉ lấy những entry chưa bị xóa
+
+        # Nếu có query param mate_id, filter theo mate_id
+        mate_id = self.request.query_params.get('mate_id')
+        if mate_id:
+            queryset = queryset.filter(mate_id=mate_id)
+
+        return queryset
+
+
+class QuestionPoolDetailView(RetrieveUpdateDestroyAPIView):
+    """
+    Xem / sửa / xoá question pool entry theo mate_id.
+
+    GET    /api/minigames/question-pool/{mate_id}/
+    PUT    /api/minigames/question-pool/{mate_id}/
+    PATCH  /api/minigames/question-pool/{mate_id}/
+    DELETE /api/minigames/question-pool/{mate_id}/
+    """
+
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = QuestionPoolSerializer
+    lookup_field = 'mate_id'
+
+    def get_queryset(self):
+        # Chỉ lấy những entry chưa bị xóa
+        return QuestionPool.objects.filter(status__gt=0)
+
+    def perform_destroy(self, instance):
+        """
+        Thực hiện soft delete bằng cách set status = 0 thay vì xóa thật.
+        """
+        instance.status = 0
+        instance.save()

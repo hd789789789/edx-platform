@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import MinigameLog
+from .models import MinigameLog, QuestionPool
 
 
 class MinigameLogSerializer(serializers.ModelSerializer):
@@ -49,3 +49,21 @@ class MinigameUserStatsSerializer(serializers.Serializer):
     level = serializers.IntegerField()
     xp_current = serializers.IntegerField()
     xp_required = serializers.IntegerField()
+
+
+class QuestionPoolSerializer(serializers.ModelSerializer):
+    """
+    Serializer cho QuestionPool model.
+    """
+
+    class Meta:
+        model = QuestionPool
+        fields = ('mate_id', 'cat_list', 'mate_meta', 'mate_content', 'status')
+
+
+class QuestionPoolMateIdSerializer(serializers.Serializer):
+    """
+    Serializer chỉ trả về mate_id cho API lấy danh sách tất cả mate_id.
+    """
+
+    mate_id = serializers.CharField()
