@@ -241,6 +241,13 @@ class MinigameUserStatsView(APIView):
 
         # Query param for client/course identification (per plan)
         clientid_param = request.query_params.get('clientid')
+        # Normalize/URL-decode clientid_param to match encoded payloads
+        try:
+            from urllib.parse import unquote
+            clientid_param = unquote(
+                clientid_param) if clientid_param is not None else None
+        except Exception:
+            pass
 
         # Maps to keep highest-score records:
         # xp_highscores: keyed by (appid, clientid) -> payload with highest score
@@ -268,8 +275,14 @@ class MinigameUserStatsView(APIView):
 
             tsms = getattr(log, 'tsms', 0)
 
-            # clientid from payload
+            # clientid from payload (may be URL-encoded)
             clientid = payload.get('clientid')
+            try:
+                if clientid:
+                    from urllib.parse import unquote
+                    clientid = unquote(clientid)
+            except Exception:
+                pass
 
             # For XP (per-course), only include records that match provided clientid_param
             if clientid_param and clientid == clientid_param:
