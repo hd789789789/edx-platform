@@ -197,33 +197,31 @@ class MinigameUserStatsView(APIView):
         Tính level và XP hiện tại từ tổng XP.
         Công thức: Tổng XP để đạt level L = 50 * L * (L+1)
         """
+        """
+        New per-level requirement:
+        XP_required(level) = 100 * (level + 1) ** 1.5
+        We iterate levels adding required XP until total_xp fits in current level.
+        """
         if total_xp <= 0:
             return {
                 'level': 0,
                 'xp_current': 0,
-                'xp_required': 100,  # Cần 100 XP để lên level 1
+                'xp_required': int(100 * (1 ** 1.5)),
             }
 
-        # Giải phương trình 50 * L * (L+1) <= total_xp
-        # L^2 + L - total_xp/50 <= 0
-        # L = (-1 + sqrt(1 + 4*total_xp/50)) / 2 = (-1 + sqrt(1 + total_xp/12.5)) / 2
-        discriminant = 1 + total_xp / 12.5
-        level = int((-1 + math.sqrt(discriminant)) / 2)
-
-        # XP đã dùng để đạt level hiện tại
-        xp_for_current_level = 50 * level * (level + 1)
-
-        # XP đã tích lũy trong level hiện tại
-        xp_current = int(total_xp - xp_for_current_level)
-
-        # XP cần để lên level tiếp theo = (level + 1) * 100
-        xp_required = (level + 1) * 100
-
-        return {
-            'level': level,
-            'xp_current': xp_current,
-            'xp_required': xp_required,
-        }
+        level = 0
+        cumulative = 0.0
+        while True:
+            next_req = 100.0 * (level + 1) ** 1.5
+            if total_xp < cumulative + next_req:
+                xp_current = int(total_xp - cumulative)
+                return {
+                    'level': level,
+                    'xp_current': xp_current,
+                    'xp_required': int(next_req),
+                }
+            cumulative += next_req
+            level += 1
 
     def get(self, request):
         user = request.user
@@ -241,12 +239,20 @@ class MinigameUserStatsView(APIView):
         # Lấy tất cả RESULT logs của user
         queryset = MinigameLog.objects.filter(user=user_str, msgtype='RESULT')
 
-        # Tính high score cho mỗi game
-        highscores = {}
+        # Query param for client/course identification (per plan)
+        clientid_param = request.query_params.get('clientid')
+
+        # Maps to keep highest-score records:
+        # xp_highscores: keyed by (appid, clientid) -> payload with highest score
+        # coin_highscores: keyed by appid -> payload with highest score
+        xp_highscores = {}
+        coin_highscores = {}
+
         for log in queryset.iterator():
             payload = log.payload or {}
-            gkey = payload.get('gameKey')
-            if not gkey:
+            # prefer 'appid', fall back to legacy 'gameKey' if present
+            appid = payload.get('appid') or payload.get('gameKey')
+            if not appid:
                 continue
 
             score_raw = payload.get('score')
@@ -260,17 +266,57 @@ class MinigameUserStatsView(APIView):
             except (TypeError, ValueError):
                 continue
 
-            existing = highscores.get(gkey)
-            if existing is None or score_val > existing:
-                highscores[gkey] = score_val
+            tsms = getattr(log, 'tsms', 0)
 
-        # Tổng XP = tổng tất cả high scores
-        total_xp = int(sum(highscores.values()))
+            # clientid from payload
+            clientid = payload.get('clientid')
 
-        # Coins = XP (có thể đổi công thức sau nếu cần)
-        total_coins = total_xp
+            # For XP (per-course), only include records that match provided clientid_param
+            if clientid_param and clientid == clientid_param:
+                key_xp = (appid, clientid)
+                existing = xp_highscores.get(key_xp)
+                if (
+                    existing is None
+                    or score_val > existing['best_score']
+                    or (score_val == existing['best_score'] and tsms > existing['tsms'])
+                ):
+                    xp_highscores[key_xp] = {
+                        'best_score': score_val,
+                        'payload': payload,
+                        'tsms': tsms,
+                    }
 
-        # Tính level
+            # For coins (system-wide) group only by appid
+            existing_coin = coin_highscores.get(appid)
+            if (
+                existing_coin is None
+                or score_val > existing_coin['best_score']
+                or (score_val == existing_coin['best_score'] and tsms > existing_coin['tsms'])
+            ):
+                coin_highscores[appid] = {
+                    'best_score': score_val,
+                    'payload': payload,
+                    'tsms': tsms,
+                }
+
+        # Compute totals from payload fields, treating missing values as 0
+        total_xp = int(
+            sum(
+                int((entry['payload'].get('xp') or 0) +
+                    (entry['payload'].get('bonus_xp') or 0))
+                for entry in xp_highscores.values()
+            )
+        )
+
+        total_coins = int(
+            sum(
+                int((entry['payload'].get('coin') or 0) +
+                    (entry['payload'].get('bonus_coin') or 0))
+                for entry in coin_highscores.values()
+            )
+        )
+
+        # Tính level dùng công thức mới
         level_info = self._calculate_level(total_xp)
 
         data = {
