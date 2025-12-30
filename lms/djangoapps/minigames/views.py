@@ -206,19 +206,20 @@ class MinigameUserStatsView(APIView):
             return {
                 'level': 0,
                 'xp_current': 0,
-                'xp_required': int(100 * (1 ** 1.5)),
+                'xp_required': int(round(100 * (1 ** 1.5))),
             }
 
         level = 0
-        cumulative = 0.0
+        cumulative = 0
         while True:
-            next_req = 100.0 * (level + 1) ** 1.5
+            # Round per-level requirement to nearest integer to match frontend behavior
+            next_req = int(round(100.0 * (level + 1) ** 1.5))
             if total_xp < cumulative + next_req:
                 xp_current = int(total_xp - cumulative)
                 return {
                     'level': level,
                     'xp_current': xp_current,
-                    'xp_required': int(next_req),
+                    'xp_required': next_req,
                 }
             cumulative += next_req
             level += 1
@@ -241,13 +242,16 @@ class MinigameUserStatsView(APIView):
 
         # Query param for client/course identification (per plan)
         clientid_param = request.query_params.get('clientid')
-        # Normalize/URL-decode clientid_param to match encoded payloads
-        try:
-            from urllib.parse import unquote
-            clientid_param = unquote(
-                clientid_param) if clientid_param is not None else None
-        except Exception:
-            pass
+        # Normalize/URL-decode clientid_param to match encoded payloads and fix +/space issues
+        if clientid_param:
+            try:
+                from urllib.parse import unquote_plus
+
+                clientid_param = unquote_plus(clientid_param)
+                # unquote_plus will convert '+' into space, transform spaces back to '+'
+                clientid_param = clientid_param.replace(' ', '+').strip()
+            except Exception:
+                clientid_param = clientid_param.strip()
 
         # Maps to keep highest-score records:
         # xp_highscores: keyed by (appid, clientid) -> payload with highest score
