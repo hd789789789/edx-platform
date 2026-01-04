@@ -6,6 +6,8 @@ from django.shortcuts import get_object_or_404
 
 from .models import QuestionBank
 from .serializers import QuestionBankSerializer
+from django.db.models import Count
+import random
 
 
 class QuestionBankListCreateAPIView(APIView):
@@ -62,6 +64,44 @@ class QuestionBankRetrieveUpdateDeleteAPIView(generics.GenericAPIView):
     def delete(self, request, code):
         obj = self.get_object()
         obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({"message": "Successfully"}, status=status.HTTP_200_OK)
 
 
+class QuestionBankRandomAPIView(APIView):
+    """
+    GET: return random questions, supports filters:
+      - quantity (int)
+      - question_type
+      - category
+      - difficulty
+    """
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        try:
+            quantity = int(request.GET.get("quantity", 1))
+        except (TypeError, ValueError):
+            quantity = 1
+
+        queryset = QuestionBank.objects.all()
+        q_type = request.GET.get("question_type")
+        if q_type:
+            queryset = queryset.filter(question_type=q_type)
+        category = request.GET.get("category")
+        if category:
+            queryset = queryset.filter(category=category)
+        difficulty = request.GET.get("difficulty")
+        if difficulty:
+            queryset = queryset.filter(difficulty=difficulty)
+
+        total = queryset.count()
+        if total == 0 or quantity <= 0:
+            return Response([], status=status.HTTP_200_OK)
+
+        # Cap quantity to total available
+        quantity = min(quantity, total)
+
+        # Use random ordering; may be slow on very large tables but acceptable for this API.
+        random_qs = queryset.order_by('?')[:quantity]
+        serializer = QuestionBankSerializer(random_qs, many=True)
+        return Response(serializer.data)
