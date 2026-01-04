@@ -35,6 +35,7 @@ class QuestionBank(models.Model):
     class Meta:
         db_table = "question_bank"
         managed = False
+        app_label = "question_bank"
         ordering = ("-created_at",)
 
     def __str__(self):
