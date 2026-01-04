@@ -8,6 +8,7 @@ from .models import QuestionBank
 from .serializers import QuestionBankSerializer
 from django.db.models import Count
 import random
+import math
 
 
 class QuestionBankListCreateAPIView(APIView):
@@ -24,8 +25,73 @@ class QuestionBankListCreateAPIView(APIView):
             serializer = QuestionBankSerializer(obj)
             return Response(serializer.data)
         queryset = QuestionBank.objects.all()
-        serializer = QuestionBankSerializer(queryset, many=True)
-        return Response(serializer.data)
+
+        # Filters (keep existing behavior)
+        q_type = request.GET.get("question_type")
+        if q_type:
+            queryset = queryset.filter(question_type=q_type)
+        category = request.GET.get("category")
+        if category:
+            queryset = queryset.filter(category=category)
+        difficulty = request.GET.get("difficulty")
+        if difficulty:
+            queryset = queryset.filter(difficulty=difficulty)
+
+        # Pagination params
+        try:
+            page = int(request.GET.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.GET.get("page_size", 20))
+        except (TypeError, ValueError):
+            page_size = 20
+        # enforce limits
+        if page < 1:
+            page = 1
+        max_page_size = 500
+        if page_size < 1:
+            page_size = 1
+        if page_size > max_page_size:
+            page_size = max_page_size
+
+        total = queryset.count()
+        if total == 0:
+            return Response(
+                {
+                    "count": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": 0,
+                    "next_page": None,
+                    "previous_page": None,
+                    "results": [],
+                }
+            )
+
+        total_pages = math.ceil(total / page_size)
+        if page > total_pages:
+            page = total_pages
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_qs = queryset.order_by("id")[start:end]
+
+        serializer = QuestionBankSerializer(page_qs, many=True)
+        next_page = page + 1 if page < total_pages else None
+        previous_page = page - 1 if page > 1 else None
+
+        return Response(
+            {
+                "count": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "next_page": next_page,
+                "previous_page": previous_page,
+                "results": serializer.data,
+            }
+        )
 
     def post(self, request):
         serializer = QuestionBankSerializer(data=request.data)
@@ -78,10 +144,17 @@ class QuestionBankRandomAPIView(APIView):
     permission_classes = (AllowAny,)
 
     def get(self, request):
+        # quantity is the desired number of items per page if page_size not provided
         try:
-            quantity = int(request.GET.get("quantity", 1))
+            quantity = request.GET.get("quantity")
+            quantity = int(quantity) if quantity is not None else None
         except (TypeError, ValueError):
-            quantity = 1
+            return Response({"message": "quantity must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # enforce maximum allowed quantity
+        max_allowed = 100
+        if quantity is not None and quantity > max_allowed:
+            return Response({"message": f"quantity cannot be greater than {max_allowed}"}, status=status.HTTP_400_BAD_REQUEST)
 
         queryset = QuestionBank.objects.all()
         q_type = request.GET.get("question_type")
@@ -94,14 +167,66 @@ class QuestionBankRandomAPIView(APIView):
         if difficulty:
             queryset = queryset.filter(difficulty=difficulty)
 
+        # Pagination params (same behavior as list)
+        try:
+            page = int(request.GET.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = request.GET.get("page_size")
+            page_size = int(page_size) if page_size is not None else None
+        except (TypeError, ValueError):
+            page_size = None
+
+        # If quantity provided and page_size not provided, use quantity as page_size
+        if page_size is None:
+            page_size = quantity if quantity is not None else 1
+
+        # validate page and page_size
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 1
+        # enforce max page_size
+        if page_size > max_allowed:
+            return Response({"message": f"page_size cannot be greater than {max_allowed}"}, status=status.HTTP_400_BAD_REQUEST)
+
         total = queryset.count()
-        if total == 0 or quantity <= 0:
-            return Response([], status=status.HTTP_200_OK)
+        if total == 0:
+            return Response(
+                {
+                    "count": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": 0,
+                    "next_page": None,
+                    "previous_page": None,
+                    "results": [],
+                }
+            )
 
-        # Cap quantity to total available
-        quantity = min(quantity, total)
+        total_pages = math.ceil(total / page_size)
+        if page > total_pages:
+            page = total_pages
 
-        # Use random ordering; may be slow on very large tables but acceptable for this API.
-        random_qs = queryset.order_by('?')[:quantity]
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        # Randomize order and slice for the requested page
+        random_qs = list(queryset.order_by('?')[start:end])
         serializer = QuestionBankSerializer(random_qs, many=True)
-        return Response(serializer.data)
+
+        next_page = page + 1 if page < total_pages else None
+        previous_page = page - 1 if page > 1 else None
+
+        return Response(
+            {
+                "count": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "next_page": next_page,
+                "previous_page": previous_page,
+                "results": serializer.data,
+            }
+        )
