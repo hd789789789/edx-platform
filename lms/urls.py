@@ -211,6 +211,10 @@ urlpatterns = [
         include(('lms.djangoapps.minigames.urls', 'lms.djangoapps.minigames'), namespace='minigames_api'),
     ),
     path(
+        'api/question_bank/',
+        include(('lms.djangoapps.question_bank.urls', 'lms.djangoapps.question_bank'), namespace='question_bank_api'),
+    ),
+    path(
         'api/discounts/',
         include(('openedx.features.discounts.urls', 'openedx.features.discounts'),
                 namespace='api_discounts'),
