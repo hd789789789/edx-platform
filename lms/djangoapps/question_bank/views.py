@@ -27,15 +27,31 @@ class QuestionBankListCreateAPIView(APIView):
         queryset = QuestionBank.objects.all()
 
         # Filters (updated to new schema)
-        q_type = request.GET.get("q_type")
-        if q_type:
-            queryset = queryset.filter(q_type=q_type)
         taxo_subject = request.GET.get("taxo_subject")
         if taxo_subject:
             queryset = queryset.filter(taxo_subject=taxo_subject)
-        difficulty = request.GET.get("q_difficulty")
-        if difficulty:
-            queryset = queryset.filter(q_difficulty=difficulty)
+        taxo_section = request.GET.get("taxo_section")
+        if taxo_section:
+            queryset = queryset.filter(taxo_section=taxo_section)
+        taxo_subsection = request.GET.get("taxo_subsection")
+        if taxo_subsection:
+            queryset = queryset.filter(taxo_subsection=taxo_subsection)
+        taxo_lot = request.GET.get("taxo_lot")
+        if taxo_lot:
+            queryset = queryset.filter(taxo_lot=taxo_lot)
+
+        q_type = request.GET.get("q_type")
+        if q_type:
+            queryset = queryset.filter(q_type=q_type)
+        q_bloom = request.GET.get("q_bloom")
+        if q_bloom:
+            queryset = queryset.filter(q_bloom=q_bloom)
+        q_difficulty = request.GET.get("q_difficulty")
+        if q_difficulty:
+            queryset = queryset.filter(q_difficulty=q_difficulty)
+        q_status = request.GET.get("q_status")
+        if q_status:
+            queryset = queryset.filter(q_status=q_status)
 
         # Pagination params
         try:
@@ -157,15 +173,31 @@ class QuestionBankRandomAPIView(APIView):
             return Response({"message": f"quantity cannot be greater than {max_allowed}"}, status=status.HTTP_400_BAD_REQUEST)
 
         queryset = QuestionBank.objects.all()
-        q_type = request.GET.get("q_type")
-        if q_type:
-            queryset = queryset.filter(q_type=q_type)
         taxo_subject = request.GET.get("taxo_subject")
         if taxo_subject:
             queryset = queryset.filter(taxo_subject=taxo_subject)
-        difficulty = request.GET.get("q_difficulty")
-        if difficulty:
-            queryset = queryset.filter(q_difficulty=difficulty)
+        taxo_section = request.GET.get("taxo_section")
+        if taxo_section:
+            queryset = queryset.filter(taxo_section=taxo_section)
+        taxo_subsection = request.GET.get("taxo_subsection")
+        if taxo_subsection:
+            queryset = queryset.filter(taxo_subsection=taxo_subsection)
+        taxo_lot = request.GET.get("taxo_lot")
+        if taxo_lot:
+            queryset = queryset.filter(taxo_lot=taxo_lot)
+
+        q_type = request.GET.get("q_type")
+        if q_type:
+            queryset = queryset.filter(q_type=q_type)
+        q_bloom = request.GET.get("q_bloom")
+        if q_bloom:
+            queryset = queryset.filter(q_bloom=q_bloom)
+        q_difficulty = request.GET.get("q_difficulty")
+        if q_difficulty:
+            queryset = queryset.filter(q_difficulty=q_difficulty)
+        q_status = request.GET.get("q_status")
+        if q_status:
+            queryset = queryset.filter(q_status=q_status)
 
         # Pagination params (same behavior as list)
         try:
