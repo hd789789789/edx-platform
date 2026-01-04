@@ -19,23 +19,23 @@ class QuestionBankListCreateAPIView(APIView):
     permission_classes = (AllowAny,)
 
     def get(self, request):
-        code = request.GET.get("code")
+        code = request.GET.get("q_code") or request.GET.get("code")
         if code:
-            obj = get_object_or_404(QuestionBank, code=code)
+            obj = get_object_or_404(QuestionBank, q_code=code)
             serializer = QuestionBankSerializer(obj)
             return Response(serializer.data)
         queryset = QuestionBank.objects.all()
 
-        # Filters (keep existing behavior)
-        q_type = request.GET.get("question_type")
+        # Filters (updated to new schema)
+        q_type = request.GET.get("q_type")
         if q_type:
-            queryset = queryset.filter(question_type=q_type)
-        category = request.GET.get("category")
-        if category:
-            queryset = queryset.filter(category=category)
-        difficulty = request.GET.get("difficulty")
+            queryset = queryset.filter(q_type=q_type)
+        taxo_subject = request.GET.get("taxo_subject")
+        if taxo_subject:
+            queryset = queryset.filter(taxo_subject=taxo_subject)
+        difficulty = request.GET.get("q_difficulty")
         if difficulty:
-            queryset = queryset.filter(difficulty=difficulty)
+            queryset = queryset.filter(q_difficulty=difficulty)
 
         # Pagination params
         try:
@@ -75,7 +75,7 @@ class QuestionBankListCreateAPIView(APIView):
 
         start = (page - 1) * page_size
         end = start + page_size
-        page_qs = queryset.order_by("id")[start:end]
+        page_qs = queryset.order_by("q_id")[start:end]
 
         serializer = QuestionBankSerializer(page_qs, many=True)
         next_page = page + 1 if page < total_pages else None
@@ -111,7 +111,7 @@ class QuestionBankRetrieveUpdateDeleteAPIView(generics.GenericAPIView):
 
     def get_object(self):
         code = self.kwargs.get("code")
-        return get_object_or_404(QuestionBank, code=code)
+        return get_object_or_404(QuestionBank, q_code=code)
 
     def put(self, request, code):
         obj = self.get_object()
@@ -157,15 +157,15 @@ class QuestionBankRandomAPIView(APIView):
             return Response({"message": f"quantity cannot be greater than {max_allowed}"}, status=status.HTTP_400_BAD_REQUEST)
 
         queryset = QuestionBank.objects.all()
-        q_type = request.GET.get("question_type")
+        q_type = request.GET.get("q_type")
         if q_type:
-            queryset = queryset.filter(question_type=q_type)
-        category = request.GET.get("category")
-        if category:
-            queryset = queryset.filter(category=category)
-        difficulty = request.GET.get("difficulty")
+            queryset = queryset.filter(q_type=q_type)
+        taxo_subject = request.GET.get("taxo_subject")
+        if taxo_subject:
+            queryset = queryset.filter(taxo_subject=taxo_subject)
+        difficulty = request.GET.get("q_difficulty")
         if difficulty:
-            queryset = queryset.filter(difficulty=difficulty)
+            queryset = queryset.filter(q_difficulty=difficulty)
 
         # Pagination params (same behavior as list)
         try:
