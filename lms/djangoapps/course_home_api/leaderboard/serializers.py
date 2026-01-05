@@ -159,3 +159,78 @@ class TopStreakSerializer(ReadOnlySerializer):
     top_students = TopStreakStudentSerializer(many=True)
     current_user_entry = TopStreakStudentSerializer(
         allow_null=True, required=False)
+
+
+# ============= Top XP Serializers =============
+
+class TopXpStudentSerializer(ReadOnlySerializer):
+    """
+    Serializer for individual student in top XP leaderboard
+    """
+    rank = serializers.IntegerField()
+    user_id = serializers.IntegerField()
+    username = serializers.CharField()
+    full_name = serializers.CharField()
+    xp = serializers.IntegerField()
+    level = serializers.IntegerField(allow_null=True, required=False)
+    is_current_user = serializers.BooleanField()
+
+
+class TopXpSummarySerializer(ReadOnlySerializer):
+    """
+    Serializer for top XP summary statistics
+    """
+    total_students = serializers.IntegerField()
+    avg_xp = serializers.FloatField()
+    max_xp = serializers.IntegerField()
+    top_count = serializers.IntegerField()
+
+
+class TopXpSerializer(ReadOnlySerializer):
+    """
+    Serializer for Top XP API response
+    """
+    success = serializers.BooleanField()
+    course_id = serializers.CharField()
+    leaderboard_type = serializers.CharField()
+    timestamp = serializers.CharField()
+    summary = TopXpSummarySerializer()
+    top_students = TopXpStudentSerializer(many=True)
+    current_user_entry = TopXpStudentSerializer(allow_null=True, required=False)
+
+
+# ============= Top Coins Serializers =============
+
+class TopCoinsStudentSerializer(ReadOnlySerializer):
+    """
+    Serializer for individual student in top coins/xu leaderboard
+    """
+    rank = serializers.IntegerField()
+    user_id = serializers.IntegerField()
+    username = serializers.CharField()
+    full_name = serializers.CharField()
+    coins = serializers.IntegerField()
+    is_current_user = serializers.BooleanField()
+
+
+class TopCoinsSummarySerializer(ReadOnlySerializer):
+    """
+    Serializer for top coins summary statistics
+    """
+    total_students = serializers.IntegerField()
+    avg_coins = serializers.FloatField()
+    max_coins = serializers.IntegerField()
+    top_count = serializers.IntegerField()
+
+
+class TopCoinsSerializer(ReadOnlySerializer):
+    """
+    Serializer for Top Coins API response
+    """
+    success = serializers.BooleanField()
+    course_id = serializers.CharField()
+    leaderboard_type = serializers.CharField()
+    timestamp = serializers.CharField()
+    summary = TopCoinsSummarySerializer()
+    top_students = TopCoinsStudentSerializer(many=True)
+    current_user_entry = TopCoinsStudentSerializer(allow_null=True, required=False)

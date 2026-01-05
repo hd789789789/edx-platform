@@ -1112,3 +1112,244 @@ class TopStreakView(RetrieveAPIView):
 
         serializer = self.get_serializer_class()(data)
         return Response(serializer.data)
+
+
+class TopXpView(RetrieveAPIView):
+    """
+    Top students by XP for a specific course.
+    GET api/course_home/top-xp/{course_key}?limit=10
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (IsAuthenticated,)
+    # Lazy import serializer to avoid circular import issues
+    from lms.djangoapps.course_home_api.leaderboard.serializers import TopXpSerializer  # noqa: E402
+    serializer_class = TopXpSerializer
+
+    def _extract_xp_and_level(self, user):
+        """Defensively extract xp and level from user/profile objects."""
+        xp = None
+        lvl = None
+        # Common possible attribute locations
+        try:
+            profile = getattr(user, 'profile', None)
+            if profile:
+                xp = getattr(profile, 'xp', xp)
+                xp = getattr(profile, 'total_xp', xp)
+                xp = getattr(profile, 'totalXp', xp)
+                lvl = getattr(profile, 'level', lvl) or getattr(profile, 'lv', lvl)
+            xp = xp or getattr(user, 'xp', None) or getattr(user, 'total_xp', None)
+        except Exception:
+            xp = xp or None
+            lvl = lvl or None
+        # Normalize to integer if possible
+        try:
+            if xp is not None:
+                xp = int(xp)
+        except Exception:
+            xp = None
+        try:
+            if lvl is not None:
+                lvl = int(lvl)
+        except Exception:
+            lvl = None
+        return xp or 0, lvl
+
+    def get(self, request, *args, **kwargs):
+        course_key_string = kwargs.get('course_key_string')
+        course_key = CourseKey.from_string(course_key_string)
+
+        limit = int(request.query_params.get('limit', 10))
+
+        # Tracing
+        monitoring_utils.set_custom_attribute('course_id', course_key_string)
+        monitoring_utils.set_custom_attribute('user_id', request.user.id)
+
+        # Access check
+        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+        enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
+        is_staff = bool(has_access(request.user, 'staff', course_key))
+        if not ((enrollment and enrollment.is_active) or is_staff):
+            return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
+
+        # Get all active enrollments
+        enrollments_qs = CourseEnrollment.objects.filter(course_id=course_key, is_active=True).select_related('user')
+        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
+        users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+
+        xp_data = []
+        for user in users:
+            xp_val, level_val = self._extract_xp_and_level(user)
+            try:
+                display_name = user.profile.name if user.profile.name else user.username
+            except Exception:
+                display_name = user.username
+            xp_data.append({
+                'user_id': user.id,
+                'username': user.username,
+                'full_name': display_name,
+                'xp': xp_val,
+                'level': level_val,
+                'is_current_user': user.id == request.user.id,
+            })
+
+        # Sort by xp desc, tie-break by date_joined (earlier = better)
+        xp_data.sort(key=lambda x: (-x['xp'], User.objects.get(id=x['user_id']).date_joined))
+
+        # Assign ranks
+        all_students_with_rank = []
+        current_user_entry = None
+        for idx, entry in enumerate(xp_data):
+            clean_entry = {
+                'rank': idx + 1,
+                'user_id': entry['user_id'],
+                'username': entry['username'],
+                'full_name': entry['full_name'],
+                'xp': entry['xp'],
+                'level': entry['level'],
+                'is_current_user': entry['is_current_user'],
+            }
+            all_students_with_rank.append(clean_entry)
+            if entry['is_current_user']:
+                current_user_entry = clean_entry.copy()
+
+        top_students = all_students_with_rank[:limit]
+        current_user_in_top = any(s.get('is_current_user') for s in top_students)
+
+        # Summary
+        all_xps = [s['xp'] for s in all_students_with_rank]
+        total_students = len(enrolled_user_ids)
+        avg_xp = round(sum(all_xps) / len(all_xps), 1) if all_xps else 0
+        max_xp = max(all_xps) if all_xps else 0
+
+        data = {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'xp',
+            'timestamp': timezone.now().isoformat(),
+            'summary': {
+                'total_students': total_students,
+                'avg_xp': avg_xp,
+                'max_xp': max_xp,
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
+        }
+
+        serializer = self.get_serializer_class()(data)
+        return Response(serializer.data)
+
+
+class TopCoinsView(RetrieveAPIView):
+    """
+    Top students by coins/xu for a specific course.
+    GET api/course_home/top-coins/{course_key}?limit=10
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (IsAuthenticated,)
+    from lms.djangoapps.course_home_api.leaderboard.serializers import TopCoinsSerializer  # noqa: E402
+    serializer_class = TopCoinsSerializer
+
+    def _extract_coins(self, user):
+        coins = None
+        try:
+            profile = getattr(user, 'profile', None)
+            if profile:
+                coins = getattr(profile, 'coins', coins)
+                coins = getattr(profile, 'total_coins', coins)
+            coins = coins or getattr(user, 'coins', None) or getattr(user, 'total_coins', None)
+        except Exception:
+            coins = coins or 0
+        try:
+            if coins is not None:
+                coins = int(coins)
+        except Exception:
+            coins = 0
+        return coins or 0
+
+    def get(self, request, *args, **kwargs):
+        course_key_string = kwargs.get('course_key_string')
+        course_key = CourseKey.from_string(course_key_string)
+
+        limit = int(request.query_params.get('limit', 10))
+
+        monitoring_utils.set_custom_attribute('course_id', course_key_string)
+        monitoring_utils.set_custom_attribute('user_id', request.user.id)
+
+        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+        enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
+        is_staff = bool(has_access(request.user, 'staff', course_key))
+        if not ((enrollment and enrollment.is_active) or is_staff):
+            return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
+
+        enrollments_qs = CourseEnrollment.objects.filter(course_id=course_key, is_active=True).select_related('user')
+        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
+        users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+
+        coins_data = []
+        for user in users:
+            coins_val = self._extract_coins(user)
+            try:
+                display_name = user.profile.name if user.profile.name else user.username
+            except Exception:
+                display_name = user.username
+            coins_data.append({
+                'user_id': user.id,
+                'username': user.username,
+                'full_name': display_name,
+                'coins': coins_val,
+                'is_current_user': user.id == request.user.id,
+            })
+
+        coins_data.sort(key=lambda x: (-x['coins'], User.objects.get(id=x['user_id']).date_joined))
+
+        all_with_rank = []
+        current_user_entry = None
+        for idx, entry in enumerate(coins_data):
+            clean = {
+                'rank': idx + 1,
+                'user_id': entry['user_id'],
+                'username': entry['username'],
+                'full_name': entry['full_name'],
+                'coins': entry['coins'],
+                'is_current_user': entry['is_current_user'],
+            }
+            all_with_rank.append(clean)
+            if entry['is_current_user']:
+                current_user_entry = clean.copy()
+
+        top_students = all_with_rank[:limit]
+        current_user_in_top = any(s.get('is_current_user') for s in top_students)
+
+        all_coins = [s['coins'] for s in all_with_rank]
+        total_students = len(enrolled_user_ids)
+        avg_coins = round(sum(all_coins) / len(all_coins), 1) if all_coins else 0
+        max_coins = max(all_coins) if all_coins else 0
+
+        data = {
+            'success': True,
+            'course_id': course_key_string,
+            'leaderboard_type': 'coins',
+            'timestamp': timezone.now().isoformat(),
+            'summary': {
+                'total_students': total_students,
+                'avg_coins': avg_coins,
+                'max_coins': max_coins,
+                'top_count': len(top_students),
+            },
+            'top_students': top_students,
+            'current_user_entry': current_user_entry if not current_user_in_top else None,
+        }
+
+        serializer = self.get_serializer_class()(data)
+        return Response(serializer.data)

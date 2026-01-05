@@ -21,6 +21,8 @@ from lms.djangoapps.course_home_api.leaderboard.views import (
     TopGradesView,
     TopProgressView,
     TopStreakView,
+    TopXpView,
+    TopCoinsView,
 )
 from lms.djangoapps.course_home_api.badge.views import BadgeView
 from lms.djangoapps.course_home_api.welcome.views import WelcomeTabView
@@ -102,6 +104,20 @@ urlpatterns += [
         fr'^top-streak/{settings.COURSE_KEY_PATTERN}$',
         TopStreakView.as_view(),
         name='top-streak'
+    ),
+]
+
+# Top XP and Coins Leaderboard URLs
+urlpatterns += [
+    re_path(
+        fr'^top-xp/{settings.COURSE_KEY_PATTERN}$',
+        TopXpView.as_view(),
+        name='top-xp'
+    ),
+    re_path(
+        fr'^top-coins/{settings.COURSE_KEY_PATTERN}$',
+        TopCoinsView.as_view(),
+        name='top-coins'
     ),
 ]
 
