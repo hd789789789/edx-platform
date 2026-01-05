@@ -28,6 +28,7 @@ from lms.djangoapps.courseware.courses import get_course_blocks_completion_summa
 from lms.djangoapps.grades.models import PersistentCourseGrade
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
+from lms.djangoapps.minigames.models import MinigameLog
 
 User = get_user_model()
 
@@ -284,21 +285,22 @@ class TopGradesView(RetrieveAPIView):
     def _generate_mock_data(self, request, limit, course_key_string, mode):
         """Generate mock test data for leaderboard testing"""
         import random
-        
+
         # Vietnamese names
         first_names = ['An', 'Bình', 'Cường', 'Dũng', 'Đức', 'Giang', 'Hà', 'Hải', 'Hiếu', 'Hoàng',
-                      'Hùng', 'Hương', 'Khang', 'Khánh', 'Kiên', 'Lan', 'Linh', 'Long', 'Mai', 'Minh',
-                      'Nam', 'Nga', 'Ngọc', 'Nhân', 'Như', 'Phong', 'Phúc', 'Quang', 'Quốc', 'Sơn',
-                      'Tâm', 'Thảo', 'Thành', 'Thiên', 'Thịnh', 'Thu', 'Thủy', 'Tiến', 'Trang', 'Trí',
-                      'Trung', 'Tú', 'Tuấn', 'Uyên', 'Văn', 'Việt', 'Vũ', 'Xuân', 'Yến', 'Ý']
+                       'Hùng', 'Hương', 'Khang', 'Khánh', 'Kiên', 'Lan', 'Linh', 'Long', 'Mai', 'Minh',
+                       'Nam', 'Nga', 'Ngọc', 'Nhân', 'Như', 'Phong', 'Phúc', 'Quang', 'Quốc', 'Sơn',
+                       'Tâm', 'Thảo', 'Thành', 'Thiên', 'Thịnh', 'Thu', 'Thủy', 'Tiến', 'Trang', 'Trí',
+                       'Trung', 'Tú', 'Tuấn', 'Uyên', 'Văn', 'Việt', 'Vũ', 'Xuân', 'Yến', 'Ý']
         last_names = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng',
-                     'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý', 'Đinh', 'Lương', 'Trương', 'Cao']
-        
+                      'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý', 'Đinh', 'Lương', 'Trương', 'Cao']
+
         # Generate 100 mock students
         all_students = []
         for i in range(1, 101):
             # Random grade (scale 10)
-            grade_type = random.choices(['high', 'medium', 'low', 'zero'], weights=[20, 40, 30, 10])[0]
+            grade_type = random.choices(
+                ['high', 'medium', 'low', 'zero'], weights=[20, 40, 30, 10])[0]
             if grade_type == 'high':
                 grade = round(random.uniform(7.0, 10.0), 1)
             elif grade_type == 'medium':
@@ -307,11 +309,11 @@ class TopGradesView(RetrieveAPIView):
                 grade = round(random.uniform(1.0, 4.0), 1)
             else:
                 grade = 0.0
-            
+
             # Random time for tie-breaking
             hours_ago = random.randint(1, 24 * 30)  # 1 hour to 30 days ago
             grade_time = timezone.now() - timedelta(hours=hours_ago)
-            
+
             all_students.append({
                 'user_id': 1000 + i,
                 'username': f'testuser_{i:03d}',
@@ -324,12 +326,12 @@ class TopGradesView(RetrieveAPIView):
                 'tie_breaker_time': grade_time,
                 'is_current_user': False,
             })
-        
+
         # Add current user at random position
         current_user_rank = random.randint(1, 100)
         current_user_grade = round(random.uniform(3.0, 9.0), 1)
         current_user_time = timezone.now() - timedelta(hours=random.randint(1, 500))
-        
+
         current_user_entry = {
             'user_id': request.user.id,
             'username': request.user.username,
@@ -343,23 +345,24 @@ class TopGradesView(RetrieveAPIView):
             'is_current_user': True,
         }
         all_students.append(current_user_entry)
-        
+
         # Sort by grade (desc), then by time (asc)
-        all_students.sort(key=lambda x: (-x['grade_percentage'], x['tie_breaker_time']))
-        
+        all_students.sort(
+            key=lambda x: (-x['grade_percentage'], x['tie_breaker_time']))
+
         # Assign ranks (no ties)
         for idx, student in enumerate(all_students):
             student['rank'] = idx + 1
             if student['is_current_user']:
                 current_user_entry = student.copy()
-        
+
         # Get top students
         top_students = all_students[:limit]
         current_user_in_top = any(s['is_current_user'] for s in top_students)
-        
+
         # Calculate summary
         all_grades = [s['grade_percentage'] for s in all_students]
-        
+
         return {
             'success': True,
             'course_id': course_key_string,
@@ -384,7 +387,7 @@ class TopGradesView(RetrieveAPIView):
         # Get query parameters
         limit = int(request.query_params.get('limit', 10))
         test_mode = request.query_params.get('test', '').lower() == 'true'
-        
+
         # Return mock data if test mode
         if test_mode:
             data = self._generate_mock_data(request, limit, course_key_string)
@@ -412,7 +415,7 @@ class TopGradesView(RetrieveAPIView):
         ).select_related('user')
         enrolled_user_ids = list(
             active_enrollments.values_list('user_id', flat=True))
-        
+
         # Tạo dict để map user_id -> enrollment created timestamp (dùng cho tie-breaking)
         enrollment_dict = {e.user_id: e.created for e in active_enrollments}
 
@@ -511,17 +514,18 @@ class TopGradesView(RetrieveAPIView):
                 'is_current_user': entry['is_current_user'],
             }
             all_students_with_rank.append(clean_entry)
-            
+
             # Lưu current user entry
             if entry['is_current_user']:
                 current_user_entry = clean_entry.copy()
 
         # Limit results cho top_students
         top_students = all_students_with_rank[:limit]
-        
+
         # Kiểm tra xem current user có nằm trong top không
-        current_user_in_top = any(s.get('is_current_user') for s in top_students)
-        
+        current_user_in_top = any(s.get('is_current_user')
+                                  for s in top_students)
+
         log.info(f"[TopGrades] current_user_entry: {current_user_entry}")
         log.info(f"[TopGrades] current_user_in_top: {current_user_in_top}")
 
@@ -611,21 +615,22 @@ class TopProgressView(RetrieveAPIView):
     def _generate_mock_data(self, request, limit, course_key_string, period):
         """Generate mock test data for progress leaderboard testing"""
         import random
-        
+
         # Vietnamese names
         first_names = ['An', 'Bình', 'Cường', 'Dũng', 'Đức', 'Giang', 'Hà', 'Hải', 'Hiếu', 'Hoàng',
-                      'Hùng', 'Hương', 'Khang', 'Khánh', 'Kiên', 'Lan', 'Linh', 'Long', 'Mai', 'Minh',
-                      'Nam', 'Nga', 'Ngọc', 'Nhân', 'Như', 'Phong', 'Phúc', 'Quang', 'Quốc', 'Sơn',
-                      'Tâm', 'Thảo', 'Thành', 'Thiên', 'Thịnh', 'Thu', 'Thủy', 'Tiến', 'Trang', 'Trí',
-                      'Trung', 'Tú', 'Tuấn', 'Uyên', 'Văn', 'Việt', 'Vũ', 'Xuân', 'Yến', 'Ý']
+                       'Hùng', 'Hương', 'Khang', 'Khánh', 'Kiên', 'Lan', 'Linh', 'Long', 'Mai', 'Minh',
+                       'Nam', 'Nga', 'Ngọc', 'Nhân', 'Như', 'Phong', 'Phúc', 'Quang', 'Quốc', 'Sơn',
+                       'Tâm', 'Thảo', 'Thành', 'Thiên', 'Thịnh', 'Thu', 'Thủy', 'Tiến', 'Trang', 'Trí',
+                       'Trung', 'Tú', 'Tuấn', 'Uyên', 'Văn', 'Việt', 'Vũ', 'Xuân', 'Yến', 'Ý']
         last_names = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng',
-                     'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý', 'Đinh', 'Lương', 'Trương', 'Cao']
-        
+                      'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý', 'Đinh', 'Lương', 'Trương', 'Cao']
+
         # Generate 100 mock students
         all_students = []
         for i in range(1, 101):
             # Random progress (0-100%)
-            progress_type = random.choices(['high', 'medium', 'low', 'zero'], weights=[15, 35, 35, 15])[0]
+            progress_type = random.choices(
+                ['high', 'medium', 'low', 'zero'], weights=[15, 35, 35, 15])[0]
             if progress_type == 'high':
                 progress = round(random.uniform(70.0, 100.0), 1)
             elif progress_type == 'medium':
@@ -634,11 +639,11 @@ class TopProgressView(RetrieveAPIView):
                 progress = round(random.uniform(5.0, 30.0), 1)
             else:
                 progress = 0.0
-            
+
             # Random enrollment time for tie-breaking
             days_ago = random.randint(1, 90)
             enroll_time = timezone.now() - timedelta(days=days_ago)
-            
+
             all_students.append({
                 'user_id': 1000 + i,
                 'username': f'testuser_{i:03d}',
@@ -647,11 +652,11 @@ class TopProgressView(RetrieveAPIView):
                 'tie_breaker_time': enroll_time,
                 'is_current_user': False,
             })
-        
+
         # Add current user at random position
         current_user_progress = round(random.uniform(20.0, 90.0), 1)
         current_user_time = timezone.now() - timedelta(days=random.randint(1, 60))
-        
+
         current_user_entry = {
             'user_id': request.user.id,
             'username': request.user.username,
@@ -661,23 +666,24 @@ class TopProgressView(RetrieveAPIView):
             'is_current_user': True,
         }
         all_students.append(current_user_entry)
-        
+
         # Sort by progress (desc), then by enrollment time (asc)
-        all_students.sort(key=lambda x: (-x['progress_percent'], x['tie_breaker_time']))
-        
+        all_students.sort(
+            key=lambda x: (-x['progress_percent'], x['tie_breaker_time']))
+
         # Assign ranks (no ties)
         for idx, student in enumerate(all_students):
             student['rank'] = idx + 1
             if student['is_current_user']:
                 current_user_entry = student.copy()
-        
+
         # Get top students
         top_students = all_students[:limit]
         current_user_in_top = any(s['is_current_user'] for s in top_students)
-        
+
         # Calculate summary
         all_progress = [s['progress_percent'] for s in all_students]
-        
+
         return {
             'success': True,
             'course_id': course_key_string,
@@ -702,10 +708,11 @@ class TopProgressView(RetrieveAPIView):
         period = request.query_params.get('period', 'all')
         limit = int(request.query_params.get('limit', 10))
         test_mode = request.query_params.get('test', '').lower() == 'true'
-        
+
         # Return mock data if test mode
         if test_mode:
-            data = self._generate_mock_data(request, limit, course_key_string, period)
+            data = self._generate_mock_data(
+                request, limit, course_key_string, period)
             return Response(data)
 
         # Enable NR tracing for this view based on course
@@ -731,7 +738,7 @@ class TopProgressView(RetrieveAPIView):
 
         # Note: period filter will be used for display purposes only
         # All enrolled users are always included in the leaderboard
-        
+
         # Tạo dict để map user_id -> enrollment created timestamp (dùng cho tie-breaking)
         enrollment_dict = {e.user_id: e.created for e in enrollments_qs}
 
@@ -805,17 +812,18 @@ class TopProgressView(RetrieveAPIView):
                 'is_current_user': entry['is_current_user'],
             }
             all_students_with_rank.append(clean_entry)
-            
+
             # Lưu current user entry
             if entry['is_current_user']:
                 current_user_entry = clean_entry.copy()
 
         # Limit results cho top_students
         top_students = all_students_with_rank[:limit]
-        
+
         # Kiểm tra xem current user có nằm trong top không
-        current_user_in_top = any(s.get('is_current_user') for s in top_students)
-        
+        current_user_in_top = any(s.get('is_current_user')
+                                  for s in top_students)
+
         log.info(f"[TopProgress] current_user_entry: {current_user_entry}")
         log.info(f"[TopProgress] current_user_in_top: {current_user_in_top}")
 
@@ -877,7 +885,8 @@ class TopStreakView(RetrieveAPIView):
         all_students = []
         for i in range(1, 101):
             # current_streak: 0–30 ngày, thiên về thấp
-            streak_type = random.choices(['high', 'medium', 'low', 'zero'], weights=[10, 30, 40, 20])[0]
+            streak_type = random.choices(
+                ['high', 'medium', 'low', 'zero'], weights=[10, 30, 40, 20])[0]
             if streak_type == 'high':
                 current_streak = random.randint(10, 30)
             elif streak_type == 'medium':
@@ -887,7 +896,8 @@ class TopStreakView(RetrieveAPIView):
             else:
                 current_streak = 0
 
-            longest_ever = max(current_streak, random.randint(current_streak, 40))
+            longest_ever = max(
+                current_streak, random.randint(current_streak, 40))
 
             # Random enrollment time for tie-breaking (earlier = better rank)
             days_ago = random.randint(1, 90)
@@ -922,17 +932,20 @@ class TopStreakView(RetrieveAPIView):
         # Sort tuỳ theo mode với tie-breaking bằng ngày tham gia (earlier = better rank)
         if mode == 'best':
             # Xếp theo streak cao nhất từng user, tie-breaking bằng ngày tham gia
-            all_students.sort(key=lambda x: (-x['longest_ever_streak'], -x['current_streak'], x['tie_breaker_time']))
+            all_students.sort(
+                key=lambda x: (-x['longest_ever_streak'], -x['current_streak'], x['tie_breaker_time']))
         else:
             # Mặc định: streak hiện tại, tie-breaking bằng longest_ever_streak rồi ngày tham gia
-            all_students.sort(key=lambda x: (-x['current_streak'], -x['longest_ever_streak'], x['tie_breaker_time']))
+            all_students.sort(
+                key=lambda x: (-x['current_streak'], -x['longest_ever_streak'], x['tie_breaker_time']))
 
         # Build leaderboard with ranking (no ties - each user gets unique rank)
         # Since we already sorted with tie-breaking (username), each user gets a unique rank
         all_with_rank = []
 
         for idx, s in enumerate(all_students):
-            s['rank'] = idx + 1  # No ties - each user gets unique rank based on sort order
+            # No ties - each user gets unique rank based on sort order
+            s['rank'] = idx + 1
             all_with_rank.append(s)
             if s['is_current_user']:
                 current_user_entry = s.copy()
@@ -941,7 +954,8 @@ class TopStreakView(RetrieveAPIView):
         current_user_in_top = any(s['is_current_user'] for s in top_students)
 
         # Dùng current_streak để tính thống kê tổng quan
-        streak_values = [s['current_streak'] for s in all_with_rank if s['current_streak'] > 0]
+        streak_values = [s['current_streak']
+                         for s in all_with_rank if s['current_streak'] > 0]
         total_with_streak = len(streak_values)
 
         return {
@@ -974,7 +988,8 @@ class TopStreakView(RetrieveAPIView):
 
         # Test mode
         if test_mode:
-            data = self._generate_mock_data(request, limit, course_key_string, mode)
+            data = self._generate_mock_data(
+                request, limit, course_key_string, mode)
             return Response(data)
 
         # Tracing
@@ -1007,8 +1022,10 @@ class TopStreakView(RetrieveAPIView):
         # Tạo dict để map user_id -> enrollment created timestamp (dùng cho tie-breaking)
         enrollment_dict = {e.user_id: e.created for e in enrollments_qs}
 
-        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
-        users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+        enrolled_user_ids = list(
+            enrollments_qs.values_list('user_id', flat=True))
+        users = User.objects.filter(
+            id__in=enrolled_user_ids).select_related('profile')
 
         # Map user_id -> UserCelebration
         celebrations = UserCelebration.objects.filter(
@@ -1019,7 +1036,8 @@ class TopStreakView(RetrieveAPIView):
         import logging
         log = logging.getLogger(__name__)
         log.info(f"[TopStreak] Total enrolled users: {len(enrolled_user_ids)}")
-        log.info(f"[TopStreak] Users with celebration rows: {len(celebration_dict)}")
+        log.info(
+            f"[TopStreak] Users with celebration rows: {len(celebration_dict)}")
 
         streak_data = []
         for user in users:
@@ -1056,7 +1074,8 @@ class TopStreakView(RetrieveAPIView):
                 key=lambda x: (
                     -x['longest_ever_streak'],
                     -x['current_streak'],
-                    x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now(),  # Tie-breaking: earlier enrollment = better rank
+                    # Tie-breaking: earlier enrollment = better rank
+                    x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now(),
                 )
             )
         else:
@@ -1065,7 +1084,8 @@ class TopStreakView(RetrieveAPIView):
                 key=lambda x: (
                     -x['current_streak'],
                     -x['longest_ever_streak'],
-                    x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now(),  # Tie-breaking: earlier enrollment = better rank
+                    # Tie-breaking: earlier enrollment = better rank
+                    x['tie_breaker_time'] if x['tie_breaker_time'] else timezone.now(),
                 )
             )
 
@@ -1089,9 +1109,11 @@ class TopStreakView(RetrieveAPIView):
                 current_user_entry = clean.copy()
 
         top_students = all_with_rank[:limit]
-        current_user_in_top = any(s.get('is_current_user') for s in top_students)
+        current_user_in_top = any(s.get('is_current_user')
+                                  for s in top_students)
 
-        streak_values = [s['current_streak'] for s in all_with_rank if s['current_streak'] > 0]
+        streak_values = [s['current_streak']
+                         for s in all_with_rank if s['current_streak'] > 0]
         total_with_streak = len(streak_values)
 
         data = {
@@ -1134,19 +1156,18 @@ class TopXpView(RetrieveAPIView):
         """Defensively extract xp and level from user/profile objects."""
         xp = None
         lvl = None
-        # Common possible attribute locations
         try:
             profile = getattr(user, 'profile', None)
             if profile:
-                xp = getattr(profile, 'xp', xp)
-                xp = getattr(profile, 'total_xp', xp)
-                xp = getattr(profile, 'totalXp', xp)
-                lvl = getattr(profile, 'level', lvl) or getattr(profile, 'lv', lvl)
-            xp = xp or getattr(user, 'xp', None) or getattr(user, 'total_xp', None)
+                xp = getattr(profile, 'xp', xp) or getattr(
+                    profile, 'total_xp', xp) or getattr(profile, 'totalXp', xp)
+                lvl = getattr(profile, 'level', None) or getattr(
+                    profile, 'lv', None)
+            xp = xp or getattr(user, 'xp', None) or getattr(
+                user, 'total_xp', None)
         except Exception:
             xp = xp or None
             lvl = lvl or None
-        # Normalize to integer if possible
         try:
             if xp is not None:
                 xp = int(xp)
@@ -1157,6 +1178,7 @@ class TopXpView(RetrieveAPIView):
                 lvl = int(lvl)
         except Exception:
             lvl = None
+        # Return 0 xp if none found
         return xp or 0, lvl
 
     def get(self, request, *args, **kwargs):
@@ -1170,20 +1192,72 @@ class TopXpView(RetrieveAPIView):
         monitoring_utils.set_custom_attribute('user_id', request.user.id)
 
         # Access check
-        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+        course = get_course_or_403(
+            request.user, 'load', course_key, check_if_enrolled=False)
         enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
         is_staff = bool(has_access(request.user, 'staff', course_key))
         if not ((enrollment and enrollment.is_active) or is_staff):
             return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
 
         # Get all active enrollments
-        enrollments_qs = CourseEnrollment.objects.filter(course_id=course_key, is_active=True).select_related('user')
-        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
-        users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+        enrollments_qs = CourseEnrollment.objects.filter(
+            course_id=course_key, is_active=True).select_related('user')
+        enrolled_user_ids = list(
+            enrollments_qs.values_list('user_id', flat=True))
+        users = User.objects.filter(
+            id__in=enrolled_user_ids).select_related('profile')
+        # Prepare user id strings used in MinigameLog.user field
+        user_strings = [str(u) for u in enrolled_user_ids]
+
+        # Aggregate XP from MinigameLog for all enrolled users (fallback/primary source)
+        # key: (user_str, appid, clientid) -> {best_score, payload, tsms}
+        xp_highscores = {}
+        try:
+            logs_qs = MinigameLog.objects.filter(
+                msgtype='RESULT', user__in=user_strings).iterator()
+            for log in logs_qs:
+                payload = log.payload or {}
+                appid = payload.get('appid') or payload.get('gameKey')
+                if not appid:
+                    continue
+                score_raw = payload.get('score') or payload.get(
+                    'bestScore') or payload.get('lastScore')
+                try:
+                    score_val = float(score_raw)
+                except (TypeError, ValueError):
+                    continue
+                tsms = getattr(log, 'tsms', 0)
+                clientid = payload.get('clientid')
+                # normalize clientid
+                try:
+                    if clientid:
+                        from urllib.parse import unquote
+                        clientid = unquote(clientid)
+                except Exception:
+                    pass
+                key = (log.user, appid, clientid)
+                existing = xp_highscores.get(key)
+                if existing is None or score_val > existing['best_score'] or (score_val == existing['best_score'] and tsms > existing.get('tsms', 0)):
+                    xp_highscores[key] = {
+                        'best_score': score_val, 'payload': payload, 'tsms': tsms}
+        except Exception:
+            # If minigames table not available or error occurs, skip and fall back to profile fields
+            xp_highscores = {}
+
+        # Sum xp per user from xp_highscores
+        xp_by_user = {str(uid): 0 for uid in enrolled_user_ids}
+        for (user_str, _, _), entry in xp_highscores.items():
+            payload = entry.get('payload', {})
+            xp_amount = int((payload.get('xp') or 0) +
+                            (payload.get('bonus_xp') or 0))
+            xp_by_user[user_str] = xp_by_user.get(user_str, 0) + xp_amount
 
         xp_data = []
         for user in users:
+            # Prefer profile/user-level xp if present; otherwise use aggregated minigame xp
             xp_val, level_val = self._extract_xp_and_level(user)
+            if not xp_val:
+                xp_val = xp_by_user.get(str(user.id), 0)
             try:
                 display_name = user.profile.name if user.profile.name else user.username
             except Exception:
@@ -1198,7 +1272,8 @@ class TopXpView(RetrieveAPIView):
             })
 
         # Sort by xp desc, tie-break by date_joined (earlier = better)
-        xp_data.sort(key=lambda x: (-x['xp'], User.objects.get(id=x['user_id']).date_joined))
+        xp_data.sort(
+            key=lambda x: (-x['xp'], User.objects.get(id=x['user_id']).date_joined))
 
         # Assign ranks
         all_students_with_rank = []
@@ -1218,7 +1293,8 @@ class TopXpView(RetrieveAPIView):
                 current_user_entry = clean_entry.copy()
 
         top_students = all_students_with_rank[:limit]
-        current_user_in_top = any(s.get('is_current_user') for s in top_students)
+        current_user_in_top = any(s.get('is_current_user')
+                                  for s in top_students)
 
         # Summary
         all_xps = [s['xp'] for s in all_students_with_rank]
@@ -1267,7 +1343,8 @@ class TopCoinsView(RetrieveAPIView):
             if profile:
                 coins = getattr(profile, 'coins', coins)
                 coins = getattr(profile, 'total_coins', coins)
-            coins = coins or getattr(user, 'coins', None) or getattr(user, 'total_coins', None)
+            coins = coins or getattr(user, 'coins', None) or getattr(
+                user, 'total_coins', None)
         except Exception:
             coins = coins or 0
         try:
@@ -1286,19 +1363,60 @@ class TopCoinsView(RetrieveAPIView):
         monitoring_utils.set_custom_attribute('course_id', course_key_string)
         monitoring_utils.set_custom_attribute('user_id', request.user.id)
 
-        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+        course = get_course_or_403(
+            request.user, 'load', course_key, check_if_enrolled=False)
         enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
         is_staff = bool(has_access(request.user, 'staff', course_key))
         if not ((enrollment and enrollment.is_active) or is_staff):
             return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
 
-        enrollments_qs = CourseEnrollment.objects.filter(course_id=course_key, is_active=True).select_related('user')
-        enrolled_user_ids = list(enrollments_qs.values_list('user_id', flat=True))
-        users = User.objects.filter(id__in=enrolled_user_ids).select_related('profile')
+        enrollments_qs = CourseEnrollment.objects.filter(
+            course_id=course_key, is_active=True).select_related('user')
+        enrolled_user_ids = list(
+            enrollments_qs.values_list('user_id', flat=True))
+        users = User.objects.filter(
+            id__in=enrolled_user_ids).select_related('profile')
 
         coins_data = []
+        # Aggregate coins from MinigameLog for all enrolled users
+        user_strings = [str(u) for u in enrolled_user_ids]
+        # key: (user_str, appid) -> {best_score, payload, tsms}
+        coin_highscores = {}
+        try:
+            logs_qs = MinigameLog.objects.filter(
+                msgtype='RESULT', user__in=user_strings).iterator()
+            for log in logs_qs:
+                payload = log.payload or {}
+                appid = payload.get('appid') or payload.get('gameKey')
+                if not appid:
+                    continue
+                score_raw = payload.get('score') or payload.get(
+                    'bestScore') or payload.get('lastScore')
+                try:
+                    score_val = float(score_raw)
+                except (TypeError, ValueError):
+                    continue
+                tsms = getattr(log, 'tsms', 0)
+                key = (log.user, appid)
+                existing = coin_highscores.get(key)
+                if existing is None or score_val > existing['best_score'] or (score_val == existing['best_score'] and tsms > existing.get('tsms', 0)):
+                    coin_highscores[key] = {
+                        'best_score': score_val, 'payload': payload, 'tsms': tsms}
+        except Exception:
+            coin_highscores = {}
+
+        coins_by_user = {str(uid): 0 for uid in enrolled_user_ids}
+        for (user_str, _), entry in coin_highscores.items():
+            payload = entry.get('payload', {})
+            coins_amount = int((payload.get('coin') or 0) +
+                               (payload.get('bonus_coin') or 0))
+            coins_by_user[user_str] = coins_by_user.get(
+                user_str, 0) + coins_amount
+
         for user in users:
             coins_val = self._extract_coins(user)
+            if not coins_val:
+                coins_val = coins_by_user.get(str(user.id), 0)
             try:
                 display_name = user.profile.name if user.profile.name else user.username
             except Exception:
@@ -1311,7 +1429,8 @@ class TopCoinsView(RetrieveAPIView):
                 'is_current_user': user.id == request.user.id,
             })
 
-        coins_data.sort(key=lambda x: (-x['coins'], User.objects.get(id=x['user_id']).date_joined))
+        coins_data.sort(
+            key=lambda x: (-x['coins'], User.objects.get(id=x['user_id']).date_joined))
 
         all_with_rank = []
         current_user_entry = None
@@ -1329,11 +1448,13 @@ class TopCoinsView(RetrieveAPIView):
                 current_user_entry = clean.copy()
 
         top_students = all_with_rank[:limit]
-        current_user_in_top = any(s.get('is_current_user') for s in top_students)
+        current_user_in_top = any(s.get('is_current_user')
+                                  for s in top_students)
 
         all_coins = [s['coins'] for s in all_with_rank]
         total_students = len(enrolled_user_ids)
-        avg_coins = round(sum(all_coins) / len(all_coins), 1) if all_coins else 0
+        avg_coins = round(sum(all_coins) / len(all_coins),
+                          1) if all_coins else 0
         max_coins = max(all_coins) if all_coins else 0
 
         data = {
