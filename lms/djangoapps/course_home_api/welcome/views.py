@@ -26,6 +26,8 @@ from openedx.core.djangoapps.content.course_overviews.models import CourseOvervi
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
 from openedx.features.content_type_gating.block_transformers import ContentTypeGateTransformer
 from openedx.features.enterprise_support.utils import get_enterprise_learner_generic_name
+from lms.djangoapps.minigames.models import MinigameLog
+from urllib.parse import unquote_plus, quote, quote_plus, unquote
 
 from .serializers import WelcomeTabSerializer
 
@@ -221,7 +223,96 @@ class WelcomeTabView(RetrieveAPIView):
         # Sort dates by date
         important_dates.sort(key=lambda x: x['date'])
 
-        # Prepare data
+        # Compute minigame stats for this course:
+        # - total_games: number of distinct appid values seen for this course (clientid matches)
+        # - user_played_games: number of distinct appid values the current user has played for this course
+        try:
+            user_str = str(request.user.id) if request.user and request.user.is_authenticated else ''
+            encoded_course = quote(course_key_string, safe='')
+            encoded_course_plus = quote_plus(course_key_string)
+            total_appids = set()
+            user_appids = set()
+
+            acceptable_clientids = {course_key_string, encoded_course, encoded_course_plus}
+
+            # Iterate RESULT logs and collect appids where clientid matches this course
+            for log in MinigameLog.objects.filter(msgtype='RESULT').iterator():
+                payload = log.payload or {}
+                clientid_raw = payload.get('clientid') or ''
+                try:
+                    clientid_unq = unquote(clientid_raw)
+                except Exception:
+                    clientid_unq = clientid_raw
+                try:
+                    clientid_unq_plus = unquote_plus(clientid_raw)
+                except Exception:
+                    clientid_unq_plus = clientid_raw
+
+                matched = False
+                # Direct matches
+                if clientid_raw in acceptable_clientids or clientid_unq in acceptable_clientids or clientid_unq_plus in acceptable_clientids:
+                    matched = True
+                # Substring matches (handle cases where clientid contains extra params)
+                if not matched:
+                    if course_key_string and (course_key_string in clientid_raw or course_key_string in clientid_unq or course_key_string in clientid_unq_plus):
+                        matched = True
+                # Also accept encoded forms appearing inside clientid
+                if not matched:
+                    if encoded_course and (encoded_course in clientid_raw or encoded_course in clientid_unq or encoded_course in clientid_unq_plus):
+                        matched = True
+
+                if matched:
+                    appid = payload.get('appid') or payload.get('gameKey')
+                    if appid:
+                        total_appids.add(appid)
+                        if str(log.user) == user_str:
+                            user_appids.add(appid)
+        except Exception:
+            # If anything goes wrong, fall back to empty sets so UI can use defaults
+            total_appids = set()
+            user_appids = set()
+
+        total_games = len(total_appids) if len(total_appids) > 0 else 0
+        user_played = len(user_appids)
+
+        # Build daily quests list including minigame progress (fallback to frontend defaults if backend doesn't know)
+        daily_quests = [
+            {
+                'id': 1,
+                'title': 'Hoàn thành khoá học',
+                'description': 'Hoàn thành Unit trong khoá học',
+                'reward': '+ XP',
+                'progress': 0,  # frontend will compute from progress model if needed
+                'total': 0,
+                'completed': False,
+                'icon': '📚',
+                'gradient': 'primary',
+            },
+            {
+                'id': 2,
+                'title': 'Luyện Game học tập tương tác',
+                'description': 'Rèn luyện kỹ năng với bài tập',
+                'reward': '+ XP • 💰 + Xu',
+                'progress': user_played,
+                'total': total_games if total_games > 0 else 5,
+                'completed': (total_games > 0 and user_played >= total_games),
+                'icon': '🎯',
+                'gradient': 'warning',
+            },
+            {
+                'id': 3,
+                'title': 'Tham gia thảo luận',
+                'description': 'Bạn phải là học viên khoá học và đăng ít nhất 1 bài trong Nhóm học tập',
+                'reward': '+ XP • 💰 + Xu',
+                'progress': 0,
+                'total': 1,
+                'completed': False,
+                'icon': '💬',
+                'gradient': 'primary',
+            },
+        ]
+
+        # Prepare response data
         data = {
             'success': True,
             'user_stats': {
@@ -231,7 +322,7 @@ class WelcomeTabView(RetrieveAPIView):
                 'class_rank': class_rank,
             },
             'important_dates': important_dates,
-            'daily_quests': [],  # Placeholder for future implementation
+            'daily_quests': daily_quests,
         }
 
         serializer = self.get_serializer(data)
