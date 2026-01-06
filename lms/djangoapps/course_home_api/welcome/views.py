@@ -28,6 +28,7 @@ from openedx.features.content_type_gating.block_transformers import ContentTypeG
 from openedx.features.enterprise_support.utils import get_enterprise_learner_generic_name
 from lms.djangoapps.minigames.models import MinigameLog
 from urllib.parse import unquote_plus, quote, quote_plus, unquote
+from lms.djangoapps.study_groups.models import StudyGroup, StudyGroupComment
 
 from .serializers import WelcomeTabSerializer
 
@@ -227,13 +228,15 @@ class WelcomeTabView(RetrieveAPIView):
         # - total_games: number of distinct appid values seen for this course (clientid matches)
         # - user_played_games: number of distinct appid values the current user has played for this course
         try:
-            user_str = str(request.user.id) if request.user and request.user.is_authenticated else ''
+            user_str = str(
+                request.user.id) if request.user and request.user.is_authenticated else ''
             encoded_course = quote(course_key_string, safe='')
             encoded_course_plus = quote_plus(course_key_string)
             total_appids = set()
             user_appids = set()
 
-            acceptable_clientids = {course_key_string, encoded_course, encoded_course_plus}
+            acceptable_clientids = {course_key_string,
+                                    encoded_course, encoded_course_plus}
 
             # Iterate RESULT logs and collect appids where clientid matches this course
             for log in MinigameLog.objects.filter(msgtype='RESULT').iterator():
@@ -275,16 +278,33 @@ class WelcomeTabView(RetrieveAPIView):
         total_games = len(total_appids) if len(total_appids) > 0 else 0
         user_played = len(user_appids)
 
-        # Build daily quests list including minigame progress (fallback to frontend defaults if backend doesn't know)
+        # Build daily quests list including server-side computed values for tasks 1 and 3.
+        # Task 1: completed units / total units
+        complete_count = completion_summary.get('complete_count', 0)
+        total_units = total_blocks
+
+        # Task 3: whether user is member of any study group in this course and has at least 1 comment
+        try:
+            user_groups_qs = StudyGroup.objects.filter(
+                course_id=course_key).filter(members__user=request.user).distinct()
+            user_in_group = user_groups_qs.exists()
+            user_comments_count = 0
+            if user_in_group:
+                user_comments_count = StudyGroupComment.objects.filter(
+                    group__in=user_groups_qs, user=request.user).count()
+        except Exception:
+            user_in_group = False
+            user_comments_count = 0
+
         daily_quests = [
             {
                 'id': 1,
                 'title': 'Hoàn thành khoá học',
                 'description': 'Hoàn thành Unit trong khoá học',
                 'reward': '+ XP',
-                'progress': 0,  # frontend will compute from progress model if needed
-                'total': 0,
-                'completed': False,
+                'progress': int(complete_count),
+                'total': int(total_units),
+                'completed': (total_units > 0 and int(complete_count) >= int(total_units)),
                 'icon': '📚',
                 'gradient': 'primary',
             },
@@ -304,9 +324,9 @@ class WelcomeTabView(RetrieveAPIView):
                 'title': 'Tham gia thảo luận',
                 'description': 'Bạn phải là học viên khoá học và đăng ít nhất 1 bài trong Nhóm học tập',
                 'reward': '+ XP • 💰 + Xu',
-                'progress': 0,
+                'progress': 1 if user_comments_count > 0 else 0,
                 'total': 1,
-                'completed': False,
+                'completed': bool(user_in_group and user_comments_count > 0),
                 'icon': '💬',
                 'gradient': 'primary',
             },
