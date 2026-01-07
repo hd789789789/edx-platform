@@ -1248,6 +1248,29 @@ class TopXpView(RetrieveAPIView):
                 if not matched:
                     if encoded_course and (encoded_course in clientid_raw or encoded_course in clientid_unq or encoded_course in clientid_unq_plus):
                         matched = True
+                # If clientid didn't match, also check other string payload values
+                # in case clientid is missing or course id is embedded elsewhere.
+                if not matched:
+                    try:
+                        for v in payload.values():
+                            if isinstance(v, str):
+                                if course_key_string and course_key_string in v:
+                                    matched = True
+                                    break
+                                if encoded_course and encoded_course in v:
+                                    matched = True
+                                    break
+                                # Also check URL-decoded form
+                                try:
+                                    v_unq = unquote(v)
+                                except Exception:
+                                    v_unq = v
+                                if course_key_string and course_key_string in v_unq:
+                                    matched = True
+                                    break
+                    except Exception:
+                        # If payload isn't iterable or something unexpected, ignore and continue
+                        matched = matched
 
                 if not matched:
                     # Skip logs not associated with this course
