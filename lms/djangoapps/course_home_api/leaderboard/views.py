@@ -1215,7 +1215,7 @@ class TopXpView(RetrieveAPIView):
         # unquoting) equals the normalized course clientid.
         xp_highscores = {}
         try:
-            from urllib.parse import unquote, unquote_plus
+            from urllib.parse import unquote, unquote_plus, quote, quote_plus
             # Normalize expected clientid (similar to how frontend calls MinigameUserStats)
             expected_clientid = course_key_string
             encoded_course = quote(course_key_string, safe='')
@@ -1223,7 +1223,8 @@ class TopXpView(RetrieveAPIView):
             # missing matches due to encoding differences.
             for uid in enrolled_user_ids:
                 user_str = str(uid)
-                user_logs = MinigameLog.objects.filter(user=user_str, msgtype='RESULT').iterator()
+                user_logs = MinigameLog.objects.filter(
+                    user=user_str, msgtype='RESULT').iterator()
                 # Per-user map keyed by (appid, clientid) to keep highest score per app+client
                 per_user_xp = {}
                 for log in user_logs:
@@ -1232,7 +1233,8 @@ class TopXpView(RetrieveAPIView):
                     if not appid:
                         continue
 
-                    score_raw = payload.get('score') or payload.get('bestScore') or payload.get('lastScore')
+                    score_raw = payload.get('score') or payload.get(
+                        'bestScore') or payload.get('lastScore')
                     try:
                         score_val = float(score_raw)
                     except (TypeError, ValueError):
@@ -1269,7 +1271,8 @@ class TopXpView(RetrieveAPIView):
                         or score_val > existing['best_score']
                         or (score_val == existing['best_score'] and tsms > existing['tsms'])
                     ):
-                        per_user_xp[key_xp] = {'best_score': score_val, 'payload': payload, 'tsms': tsms}
+                        per_user_xp[key_xp] = {
+                            'best_score': score_val, 'payload': payload, 'tsms': tsms}
 
                 # Merge per_user_xp into global xp_highscores with user id prefixed
                 for (appid, clientid_val), entry in per_user_xp.items():
