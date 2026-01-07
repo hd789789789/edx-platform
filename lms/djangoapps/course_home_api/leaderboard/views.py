@@ -1209,92 +1209,73 @@ class TopXpView(RetrieveAPIView):
         # Prepare user id strings used in MinigameLog.user field
         user_strings = [str(u) for u in enrolled_user_ids]
 
-        # Aggregate XP from MinigameLog for enrolled users, but only include logs
-        # that are relevant to this course (clientid matches the course key).
-        # key: (user_str, appid, clientid) -> {best_score, payload, tsms}
+        # Aggregate XP from MinigameLog for enrolled users by reusing the same
+        # matching logic as MinigameUserStatsView: for each user, iterate their
+        # RESULT logs and include entries whose payload.clientid (after
+        # unquoting) equals the normalized course clientid.
         xp_highscores = {}
         try:
-            # Prepare acceptable clientid variants for this course (raw and encoded)
             from urllib.parse import unquote, unquote_plus
+            # Normalize expected clientid (similar to how frontend calls MinigameUserStats)
+            expected_clientid = course_key_string
             encoded_course = quote(course_key_string, safe='')
-            encoded_course_plus = quote_plus(course_key_string)
-            acceptable_clientids = {course_key_string, encoded_course, encoded_course_plus}
+            # Iterate per-user to mirror MinigameUserStats behaviour and avoid
+            # missing matches due to encoding differences.
+            for uid in enrolled_user_ids:
+                user_str = str(uid)
+                user_logs = MinigameLog.objects.filter(user=user_str, msgtype='RESULT').iterator()
+                # Per-user map keyed by (appid, clientid) to keep highest score per app+client
+                per_user_xp = {}
+                for log in user_logs:
+                    payload = log.payload or {}
+                    appid = payload.get('appid') or payload.get('gameKey')
+                    if not appid:
+                        continue
 
-            logs_qs = MinigameLog.objects.filter(
-                msgtype='RESULT', user__in=user_strings).iterator()
-            for log in logs_qs:
-                payload = log.payload or {}
-
-                # Determine clientid and normalize possible encoded forms
-                clientid_raw = payload.get('clientid') or ''
-                try:
-                    clientid_unq = unquote(clientid_raw)
-                except Exception:
-                    clientid_unq = clientid_raw
-                try:
-                    clientid_unq_plus = unquote_plus(clientid_raw)
-                except Exception:
-                    clientid_unq_plus = clientid_raw
-
-                matched = False
-                # Direct exact matches
-                if clientid_raw in acceptable_clientids or clientid_unq in acceptable_clientids or clientid_unq_plus in acceptable_clientids:
-                    matched = True
-                # Substring matches (handle clientid containing extra params)
-                if not matched:
-                    if course_key_string and (course_key_string in clientid_raw or course_key_string in clientid_unq or course_key_string in clientid_unq_plus):
-                        matched = True
-                # Also accept encoded forms appearing inside clientid
-                if not matched:
-                    if encoded_course and (encoded_course in clientid_raw or encoded_course in clientid_unq or encoded_course in clientid_unq_plus):
-                        matched = True
-                # If clientid didn't match, also check other string payload values
-                # in case clientid is missing or course id is embedded elsewhere.
-                if not matched:
+                    score_raw = payload.get('score') or payload.get('bestScore') or payload.get('lastScore')
                     try:
-                        for v in payload.values():
-                            if isinstance(v, str):
-                                if course_key_string and course_key_string in v:
-                                    matched = True
-                                    break
-                                if encoded_course and encoded_course in v:
-                                    matched = True
-                                    break
-                                # Also check URL-decoded form
-                                try:
-                                    v_unq = unquote(v)
-                                except Exception:
-                                    v_unq = v
-                                if course_key_string and course_key_string in v_unq:
-                                    matched = True
-                                    break
+                        score_val = float(score_raw)
+                    except (TypeError, ValueError):
+                        continue
+
+                    tsms = getattr(log, 'tsms', 0)
+
+                    clientid = payload.get('clientid')
+                    try:
+                        if clientid:
+                            clientid = unquote(clientid)
                     except Exception:
-                        # If payload isn't iterable or something unexpected, ignore and continue
-                        matched = matched
+                        pass
 
-                if not matched:
-                    # Skip logs not associated with this course
-                    continue
+                    # Match only records where clientid equals expected_clientid
+                    if not clientid or clientid != expected_clientid:
+                        # also accept encoded form inside payload values (fallback)
+                        matched = False
+                        try:
+                            for v in payload.values():
+                                if isinstance(v, str):
+                                    if expected_clientid in v or encoded_course in v:
+                                        matched = True
+                                        break
+                        except Exception:
+                            matched = False
+                        if not matched:
+                            continue
 
-                appid = payload.get('appid') or payload.get('gameKey')
-                if not appid:
-                    continue
-                score_raw = payload.get('score') or payload.get(
-                    'bestScore') or payload.get('lastScore')
-                try:
-                    score_val = float(score_raw)
-                except (TypeError, ValueError):
-                    continue
-                tsms = getattr(log, 'tsms', 0)
-                # Use normalized clientid for the key to keep consistency
-                clientid_for_key = clientid_unq or clientid_raw
-                key = (log.user, appid, clientid_for_key)
-                existing = xp_highscores.get(key)
-                if existing is None or score_val > existing['best_score'] or (score_val == existing['best_score'] and tsms > existing.get('tsms', 0)):
-                    xp_highscores[key] = {
-                        'best_score': score_val, 'payload': payload, 'tsms': tsms}
+                    key_xp = (appid, clientid or '')
+                    existing = per_user_xp.get(key_xp)
+                    if (
+                        existing is None
+                        or score_val > existing['best_score']
+                        or (score_val == existing['best_score'] and tsms > existing['tsms'])
+                    ):
+                        per_user_xp[key_xp] = {'best_score': score_val, 'payload': payload, 'tsms': tsms}
+
+                # Merge per_user_xp into global xp_highscores with user id prefixed
+                for (appid, clientid_val), entry in per_user_xp.items():
+                    key = (user_str, appid, clientid_val)
+                    xp_highscores[key] = entry
         except Exception:
-            # If minigames table not available or error occurs, skip and fall back to profile fields
             xp_highscores = {}
 
         # Sum xp per user from xp_highscores
