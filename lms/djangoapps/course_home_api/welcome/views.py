@@ -268,7 +268,6 @@ class WelcomeTabView(RetrieveAPIView):
                 return False
 
             # Cache minigame stats per course (expensive full-scan, cache 10 phút)
-            from django.core.cache import cache as django_cache
             cache_key = f'minigame_appids_{course_key_string}'
             cached = django_cache.get(cache_key)
 
