@@ -512,9 +512,6 @@ class TopGradesView(RetrieveAPIView):
         current_user_in_top = any(s.get('is_current_user')
                                   for s in top_students)
 
-        log.info(f"[TopGrades] current_user_entry: {current_user_entry}")
-        log.info(f"[TopGrades] current_user_in_top: {current_user_in_top}")
-
         # Calculate summary statistics from ALL enrolled students
         # Note: grades are now on scale of 10, so multiply by 10 for percentage display
         all_grades = [g['grade_percentage'] for g in grades_data]
@@ -524,8 +521,6 @@ class TopGradesView(RetrieveAPIView):
                           1) if all_grades else 0
         max_grade = max(all_grades) if all_grades else 0
         min_grade = min(all_grades) if all_grades else 0
-        log.info(
-            f"[TopGrades] Stats - total: {total_students}, avg: {avg_grade}, max: {max_grade}")
 
         data = {
             'success': True,
@@ -802,9 +797,6 @@ class TopProgressView(RetrieveAPIView):
         # Kiểm tra xem current user có nằm trong top không
         current_user_in_top = any(s.get('is_current_user')
                                   for s in top_students)
-
-        log.info(f"[TopProgress] current_user_entry: {current_user_entry}")
-        log.info(f"[TopProgress] current_user_in_top: {current_user_in_top}")
 
         # Calculate summary statistics
         all_progress = [p['progress_percent'] for p in progress_data]

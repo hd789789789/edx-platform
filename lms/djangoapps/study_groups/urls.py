@@ -43,7 +43,7 @@ urlpatterns = [
         name='study-groups-members-list'
     ),
     path(
-        'study-groups/<int:id>/members/<int:user_id>/',
+        'study-groups/<int:id>/members/<str:user_id>/',
         StudyGroupMemberDetailView.as_view(),
         name='study-groups-members-detail'
     ),
