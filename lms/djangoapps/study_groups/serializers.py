@@ -439,10 +439,6 @@ class StudyGroupInvitationCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {'user': _('Người dùng đã là thành viên của nhóm.')}
             )
-        if StudyGroupInvitation.objects.filter(group=group, invitee=invitee, status='pending').exists():
-            raise serializers.ValidationError(
-                {'user': _('Đã gửi lời mời cho người dùng này rồi.')}
-            )
         return attrs
 
     def create(self, validated_data):
