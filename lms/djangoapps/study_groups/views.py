@@ -469,6 +469,14 @@ class StudyGroupMemberDetailView(DestroyAPIView):
         except (User.DoesNotExist, StudyGroupMember.DoesNotExist):
             raise Http404(_("Member not found"))
 
+    def perform_destroy(self, instance):
+        """Delete the member and clean up related invitation so they can be re-invited."""
+        group = instance.group
+        user_id = instance.user_id
+        instance.delete()
+        # Remove any invitation for this user in this group, so owner can re-invite later
+        StudyGroupInvitation.objects.filter(group=group, invitee_id=user_id).delete()
+
 
 class AvailableMembersPagination(DefaultPagination):
     """Pagination for available members list."""

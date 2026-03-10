@@ -446,16 +446,15 @@ class StudyGroupInvitationCreateSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
-        """Create the invitation. Delete old non-pending invitation if exists (re-invite after removal)."""
+        """Create the invitation. Delete old invitation if exists (re-invite after removal/decline)."""
         group = self.context['group']
         request = self.context['request']
         invitee = validated_data['user']
 
-        # Remove old accepted/declined invitation to allow re-invite
+        # Remove ALL old invitations to allow re-invite (including pending for edge cases)
         StudyGroupInvitation.objects.filter(
             group=group,
             invitee=invitee,
-            status__in=['accepted', 'declined'],
         ).delete()
 
         return StudyGroupInvitation.objects.create(
