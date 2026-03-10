@@ -422,20 +422,51 @@ class StudyGroupMemberDetailView(DestroyAPIView):
             group = StudyGroup.objects.get(id=group_id)
         except StudyGroup.DoesNotExist:
             raise Http404(_("Study group not found"))
-        
-        # Check permission
-        if not can_user_manage_members(self.request.user, group):
+
+        # Check permission: owner/staff can remove anyone,
+        # regular members can only remove themselves (leave group)
+        user_id_param = self.kwargs.get('user_id')
+        is_removing_self = self._is_target_current_user(user_id_param)
+
+        if not is_removing_self and not can_user_manage_members(self.request.user, group):
             raise PermissionDenied(_("You don't have permission to manage members."))
-        
+
         return StudyGroupMember.objects.filter(group=group)
+
+    def _is_target_current_user(self, user_id_param):
+        """Check if the target user_id/username matches the current request user."""
+        user = self.request.user
+        try:
+            return int(user_id_param) == user.id
+        except (ValueError, TypeError):
+            pass
+        return str(user_id_param) == user.username
     
     def get_object(self):
-        """Get the membership object to delete."""
+        """Get the membership object to delete.
+
+        Accepts either numeric user_id or username in the URL path,
+        since frontend may send either depending on context.
+        """
         queryset = self.get_queryset()
         user_id = self.kwargs.get('user_id')
+
+        # Try numeric user_id first
         try:
-            return queryset.get(user_id=user_id)
+            numeric_id = int(user_id)
+            return queryset.get(user_id=numeric_id)
+        except (ValueError, TypeError):
+            pass
         except StudyGroupMember.DoesNotExist:
+            raise Http404(_("Member not found"))
+
+        # Fallback: treat as username and look up the User
+        try:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user = User.objects.get(username=user_id)
+            return queryset.get(user_id=user.id)
+        except (User.DoesNotExist, StudyGroupMember.DoesNotExist):
             raise Http404(_("Member not found"))
 
 
@@ -705,39 +736,6 @@ class StudyGroupCommentListView(ListCreateAPIView):
         if self.request.method == 'POST':
             return CommentCreateSerializer
         return StudyGroupCommentSerializer
-    
-    def list(self, request, *args, **kwargs):
-        """Override list to log attachments."""
-        response = super().list(request, *args, **kwargs)
-        
-        # Log attachments in response for debugging
-        if response.data and 'results' in response.data:
-            for comment_data in response.data['results'][:3]:  # Log first 3 comments
-                comment_id = comment_data.get('id')
-                attachments = comment_data.get('attachments', [])
-                
-                # Also check the actual comment object from DB
-                try:
-                    from lms.djangoapps.study_groups.models import StudyGroupComment
-                    comment_obj = StudyGroupComment.objects.prefetch_related('attachments').get(id=comment_id)
-                    db_attachments_count = comment_obj.attachments.count()
-                    db_attachments = list(comment_obj.attachments.values('id', 'file_name', 'file_type'))
-                except Exception as e:
-                    db_attachments_count = -1
-                    db_attachments = []
-                    log.warning('Failed to get comment from DB', extra={'comment_id': comment_id, 'error': str(e)})
-                
-                log.info('Comment in list response', extra={
-                    'comment_id': comment_id,
-                    'has_attachments_field': 'attachments' in comment_data,
-                    'attachments_count_in_response': len(attachments) if isinstance(attachments, list) else 0,
-                    'attachments_type': type(attachments).__name__,
-                    'attachments_in_response': attachments[:2] if isinstance(attachments, list) and len(attachments) > 0 else [],
-                    'db_attachments_count': db_attachments_count,
-                    'db_attachments': db_attachments[:2],
-                })
-        
-        return response
     
     def perform_create(self, serializer):
         """Create a new comment."""

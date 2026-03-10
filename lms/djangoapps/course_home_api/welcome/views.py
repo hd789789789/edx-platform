@@ -26,6 +26,7 @@ from openedx.core.djangoapps.content.course_overviews.models import CourseOvervi
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
 from openedx.features.content_type_gating.block_transformers import ContentTypeGateTransformer
 from openedx.features.enterprise_support.utils import get_enterprise_learner_generic_name
+from django.core.cache import cache as django_cache
 from lms.djangoapps.minigames.models import MinigameLog
 from urllib.parse import unquote_plus, quote, quote_plus, unquote
 from lms.djangoapps.study_groups.models import StudyGroup, StudyGroupComment
@@ -88,6 +89,12 @@ class WelcomeTabView(RetrieveAPIView):
 
         if not ((enrollment and enrollment.is_active) or is_staff):
             return Response({'success': False, 'error': 'User not enrolled.'}, status=401)
+
+        # Check cache first — cache per user per course for 5 minutes
+        welcome_cache_key = f'welcome_tab_{course_key_string}_{request.user.id}'
+        cached_response = django_cache.get(welcome_cache_key)
+        if cached_response is not None:
+            return Response(cached_response)
 
         # Get course overview
         course_overview = CourseOverview.get_from_id(course_key)
@@ -238,10 +245,12 @@ class WelcomeTabView(RetrieveAPIView):
             acceptable_clientids = {course_key_string,
                                     encoded_course, encoded_course_plus}
 
-            # Iterate RESULT logs and collect appids where clientid matches this course
-            for log in MinigameLog.objects.filter(msgtype='RESULT').iterator():
-                payload = log.payload or {}
-                clientid_raw = payload.get('clientid') or ''
+            def _clientid_matches_course(clientid_raw):
+                """Check if a clientid matches the current course."""
+                if not clientid_raw:
+                    return False
+                if clientid_raw in acceptable_clientids:
+                    return True
                 try:
                     clientid_unq = unquote(clientid_raw)
                 except Exception:
@@ -250,26 +259,46 @@ class WelcomeTabView(RetrieveAPIView):
                     clientid_unq_plus = unquote_plus(clientid_raw)
                 except Exception:
                     clientid_unq_plus = clientid_raw
+                if clientid_unq in acceptable_clientids or clientid_unq_plus in acceptable_clientids:
+                    return True
+                if course_key_string and (course_key_string in clientid_raw or course_key_string in clientid_unq or course_key_string in clientid_unq_plus):
+                    return True
+                if encoded_course and (encoded_course in clientid_raw or encoded_course in clientid_unq or encoded_course in clientid_unq_plus):
+                    return True
+                return False
 
-                matched = False
-                # Direct matches
-                if clientid_raw in acceptable_clientids or clientid_unq in acceptable_clientids or clientid_unq_plus in acceptable_clientids:
-                    matched = True
-                # Substring matches (handle cases where clientid contains extra params)
-                if not matched:
-                    if course_key_string and (course_key_string in clientid_raw or course_key_string in clientid_unq or course_key_string in clientid_unq_plus):
-                        matched = True
-                # Also accept encoded forms appearing inside clientid
-                if not matched:
-                    if encoded_course and (encoded_course in clientid_raw or encoded_course in clientid_unq or encoded_course in clientid_unq_plus):
-                        matched = True
+            # Cache minigame stats per course (expensive full-scan, cache 10 phút)
+            from django.core.cache import cache as django_cache
+            cache_key = f'minigame_appids_{course_key_string}'
+            cached = django_cache.get(cache_key)
 
-                if matched:
-                    appid = payload.get('appid') or payload.get('gameKey')
-                    if appid:
-                        total_appids.add(appid)
-                        if str(log.user) == user_str:
+            if cached is not None:
+                total_appids = cached.get('total_appids', set())
+                # Still need to compute user_appids from user's own logs
+                for log in MinigameLog.objects.filter(
+                    msgtype='RESULT', user=user_str
+                ).only('payload').iterator():
+                    payload = log.payload or {}
+                    clientid_raw = payload.get('clientid') or ''
+                    if _clientid_matches_course(clientid_raw):
+                        appid = payload.get('appid') or payload.get('gameKey')
+                        if appid:
                             user_appids.add(appid)
+            else:
+                # Full scan needed — but use .only() to reduce data transfer
+                for log in MinigameLog.objects.filter(
+                    msgtype='RESULT'
+                ).only('user', 'payload').iterator():
+                    payload = log.payload or {}
+                    clientid_raw = payload.get('clientid') or ''
+                    if _clientid_matches_course(clientid_raw):
+                        appid = payload.get('appid') or payload.get('gameKey')
+                        if appid:
+                            total_appids.add(appid)
+                            if str(log.user) == user_str:
+                                user_appids.add(appid)
+                # Cache total_appids for 10 minutes
+                django_cache.set(cache_key, {'total_appids': total_appids}, 600)
         except Exception:
             # If anything goes wrong, fall back to empty sets so UI can use defaults
             total_appids = set()
@@ -346,4 +375,6 @@ class WelcomeTabView(RetrieveAPIView):
         }
 
         serializer = self.get_serializer(data)
+        # Cache response for 5 minutes to avoid expensive recomputation
+        django_cache.set(welcome_cache_key, serializer.data, 300)
         return Response(serializer.data)

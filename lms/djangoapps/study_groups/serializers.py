@@ -170,24 +170,27 @@ class StudyGroupCommentSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'created_at', 'updated_at')
     
     def get_reaction_counts(self, obj):
-        """Get counts of each reaction type."""
+        """Get counts of each reaction type using prefetched data (no extra queries)."""
         counts = {}
+        # Use prefetched reactions.all() instead of .filter().count()
+        all_reactions = list(obj.reactions.all())
         for reaction_type, _ in CommentReaction.REACTION_TYPES:
-            counts[reaction_type] = obj.reactions.filter(reaction_type=reaction_type).count()
+            counts[reaction_type] = sum(1 for r in all_reactions if r.reaction_type == reaction_type)
         return counts
-    
+
     def get_user_reaction(self, obj):
-        """Get the current user's reaction, if any."""
+        """Get the current user's reaction using prefetched data (no extra query)."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            reaction = obj.reactions.filter(user=request.user).first()
-            if reaction:
-                return reaction.reaction_type
+            # Use prefetched reactions.all() instead of .filter().first()
+            for reaction in obj.reactions.all():
+                if reaction.user_id == request.user.id:
+                    return reaction.reaction_type
         return None
-    
+
     def get_replies_count(self, obj):
-        """Get the number of replies to this comment."""
-        return obj.replies.count()
+        """Get the number of replies using prefetched data (no extra query)."""
+        return len(obj.replies.all())
     
     def get_replies(self, obj):
         """Get replies to this comment."""
@@ -243,21 +246,23 @@ class StudyGroupSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'created_at', 'updated_at')
     
     def get_member_count(self, obj):
-        """Get the number of members."""
-        return obj.get_member_count()
-    
+        """Get the number of members using prefetched data (no extra query)."""
+        return len(obj.members.all())
+
     def get_is_member(self, obj):
-        """Check if current user is a member."""
+        """Check if current user is a member using prefetched data (no extra query)."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            return obj.is_member(request.user)
+            return any(m.user_id == request.user.id for m in obj.members.all())
         return False
-    
+
     def get_user_role(self, obj):
-        """Get the current user's role in the group."""
+        """Get the current user's role using prefetched data (no extra query)."""
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            return obj.get_user_role(request.user)
+            for m in obj.members.all():
+                if m.user_id == request.user.id:
+                    return m.role
         return None
     
     def get_can_edit(self, obj):

@@ -190,6 +190,12 @@ class OutlineTabView(RetrieveAPIView):
         monitoring_utils.set_custom_attribute('user_id', request.user.id)
         monitoring_utils.set_custom_attribute('is_staff', request.user.is_staff)
 
+        # Serve from cache if available (per user, 5 min TTL)
+        outline_cache_key = f'outline_tab_{course_key_string}_{request.user.id}'
+        cached_response = cache.get(outline_cache_key)
+        if cached_response is not None:
+            return Response(cached_response)
+
         course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
 
         masquerade_object, request.user = setup_masquerade(
@@ -365,6 +371,9 @@ class OutlineTabView(RetrieveAPIView):
         context['enable_links'] = show_enrolled or allow_public
         context['enrollment'] = enrollment
         serializer = self.get_serializer_class()(data, context=context)
+
+        # Cache serialized response for 5 minutes
+        cache.set(outline_cache_key, serializer.data, 300)
 
         return Response(serializer.data)
 

@@ -22,6 +22,7 @@ from lms.djangoapps.course_home_api.leaderboard.serializers import (
     TopProgressSerializer,
     TopStreakSerializer,
 )
+from django.core.cache import cache as django_cache
 from lms.djangoapps.course_home_api.utils import get_course_or_403
 from lms.djangoapps.courseware.access import has_access
 from lms.djangoapps.courseware.courses import get_course_blocks_completion_summary
@@ -118,11 +119,16 @@ class LeaderboardTabView(RetrieveAPIView):
         )
         grades_dict = {grade.user_id: grade for grade in course_grades}
 
-        # Calculate completion percentage for all users
+        # Calculate completion percentage for all users (with per-user caching)
         completion_data = []
         for user in all_users:
-            completion_summary = get_course_blocks_completion_summary(
-                course_key, user)
+            cache_key = f'completion_summary_{course_key}_{user.id}'
+            completion_summary = django_cache.get(cache_key)
+            if completion_summary is None:
+                completion_summary = get_course_blocks_completion_summary(
+                    course_key, user)
+                django_cache.set(cache_key, completion_summary, 300)  # cache 5 phút
+
             complete_count = completion_summary.get('complete_count', 0)
             incomplete_count = completion_summary.get('incomplete_count', 0)
             locked_count = completion_summary.get('locked_count', 0)
@@ -131,12 +137,11 @@ class LeaderboardTabView(RetrieveAPIView):
             completion_percent = (
                 complete_count / total_units * 100) if total_units > 0 else 0.0
 
-            # Get grade info for letter grade and passing status
             grade = grades_dict.get(user.id)
 
             try:
                 display_name = user.profile.name if user.profile.name else user.username
-            except:
+            except Exception:
                 display_name = user.username
 
             completion_data.append({
@@ -187,20 +192,6 @@ class LeaderboardTabView(RetrieveAPIView):
         # Calculate current user rank info
         total_students = len(leaderboard_data)
         current_user_rank_info = None
-
-        # Debug logging
-        import logging
-        log = logging.getLogger(__name__)
-        log.info(f"[Leaderboard] Request user ID: {request.user.id}")
-        log.info(
-            f"[Leaderboard] Total enrolled users: {len(enrolled_user_ids)}")
-        log.info(f"[Leaderboard] Users with grades: {len(grades_dict)}")
-        log.info(f"[Leaderboard] Total in leaderboard: {total_students}")
-        log.info(
-            f"[Leaderboard] Current user found: {current_user_entry is not None}")
-        if current_user_entry:
-            log.info(
-                f"[Leaderboard] Current user rank: {current_user_entry['rank']}, completion: {current_user_entry['grade_percent']}%")
 
         if current_user_entry:
             percentile = (
@@ -419,10 +410,6 @@ class TopGradesView(RetrieveAPIView):
         # Tạo dict để map user_id -> enrollment created timestamp (dùng cho tie-breaking)
         enrollment_dict = {e.user_id: e.created for e in active_enrollments}
 
-        import logging
-        log = logging.getLogger(__name__)
-        log.info(f"[TopGrades] Total enrolled users: {len(enrolled_user_ids)}")
-
         # Get ALL enrolled users (not just those with grades)
         all_users = User.objects.filter(
             id__in=enrolled_user_ids).select_related('profile')
@@ -434,7 +421,6 @@ class TopGradesView(RetrieveAPIView):
             user_id__in=enrolled_user_ids
         )
         grades_dict = {grade.user_id: grade for grade in course_grades}
-        log.info(f"[TopGrades] Users with grades: {len(grades_dict)}")
 
         # Build grades data for ALL enrolled users
         grades_data = []
@@ -747,16 +733,16 @@ class TopProgressView(RetrieveAPIView):
         all_users = User.objects.filter(
             id__in=enrolled_user_ids).select_related('profile')
 
-        import logging
-        log = logging.getLogger(__name__)
-        log.info(
-            f"[TopProgress] Total enrolled users: {len(enrolled_user_ids)}")
-
-        # Calculate completion percentage for all users
+        # Calculate completion percentage for all users (with per-user caching)
         progress_data = []
         for user in all_users:
-            completion_summary = get_course_blocks_completion_summary(
-                course_key, user)
+            cache_key = f'completion_summary_{course_key}_{user.id}'
+            completion_summary = django_cache.get(cache_key)
+            if completion_summary is None:
+                completion_summary = get_course_blocks_completion_summary(
+                    course_key, user)
+                django_cache.set(cache_key, completion_summary, 300)  # cache 5 phút
+
             complete_count = completion_summary.get('complete_count', 0)
             incomplete_count = completion_summary.get('incomplete_count', 0)
             locked_count = completion_summary.get('locked_count', 0)
@@ -765,18 +751,11 @@ class TopProgressView(RetrieveAPIView):
             completion_percent = round(
                 (complete_count / total_units * 100), 2) if total_units > 0 else 0.0
 
-            # Debug logging for each user
-            log.info(
-                f"[TopProgress] User {user.username}: complete={complete_count}, "
-                f"incomplete={incomplete_count}, locked={locked_count}, "
-                f"total={total_units}, percent={completion_percent}%")
-
             try:
                 display_name = user.profile.name if user.profile.name else user.username
-            except:
+            except Exception:
                 display_name = user.username
 
-            # Tie-breaking: dùng enrollment created hoặc user date_joined
             tie_breaker_time = enrollment_dict.get(user.id)
             if not tie_breaker_time:
                 tie_breaker_time = user.date_joined
@@ -786,7 +765,7 @@ class TopProgressView(RetrieveAPIView):
                 'username': user.username,
                 'full_name': display_name,
                 'progress_percent': completion_percent,
-                'tie_breaker_time': tie_breaker_time,  # Dùng để sort tie-breaking
+                'tie_breaker_time': tie_breaker_time,
                 'is_current_user': user.id == request.user.id,
             })
 
@@ -1033,12 +1012,6 @@ class TopStreakView(RetrieveAPIView):
         )
         celebration_dict = {c.user_id: c for c in celebrations}
 
-        import logging
-        log = logging.getLogger(__name__)
-        log.info(f"[TopStreak] Total enrolled users: {len(enrolled_user_ids)}")
-        log.info(
-            f"[TopStreak] Users with celebration rows: {len(celebration_dict)}")
-
         streak_data = []
         for user in users:
             celebration = celebration_dict.get(user.id)
@@ -1209,75 +1182,65 @@ class TopXpView(RetrieveAPIView):
         # Prepare user id strings used in MinigameLog.user field
         user_strings = [str(u) for u in enrolled_user_ids]
 
-        # Aggregate XP from MinigameLog for enrolled users by reusing the same
-        # matching logic as MinigameUserStatsView: for each user, iterate their
-        # RESULT logs and include entries whose payload.clientid (after
-        # unquoting) equals the normalized course clientid.
+        # Aggregate XP from MinigameLog for enrolled users.
+        # Use a SINGLE bulk query instead of N per-user queries.
         xp_highscores = {}
         try:
             from urllib.parse import unquote, unquote_plus, quote, quote_plus
-            # Normalize expected clientid (similar to how frontend calls MinigameUserStats)
             expected_clientid = course_key_string
             encoded_course = quote(course_key_string, safe='')
-            # Iterate per-user to mirror MinigameUserStats behaviour and avoid
-            # missing matches due to encoding differences.
-            for uid in enrolled_user_ids:
-                user_str = str(uid)
-                user_logs = MinigameLog.objects.filter(
-                    user=user_str, msgtype='RESULT').iterator()
-                # Per-user map keyed by (appid, clientid) to keep highest score per app+client
-                per_user_xp = {}
-                for log in user_logs:
-                    payload = log.payload or {}
-                    appid = payload.get('appid') or payload.get('gameKey')
-                    if not appid:
-                        continue
 
-                    score_raw = payload.get('score') or payload.get(
-                        'bestScore') or payload.get('lastScore')
+            # Single query for ALL enrolled users' RESULT logs
+            all_logs = MinigameLog.objects.filter(
+                msgtype='RESULT', user__in=user_strings
+            ).only('user', 'payload', 'tsms').iterator()
+
+            for log in all_logs:
+                payload = log.payload or {}
+                appid = payload.get('appid') or payload.get('gameKey')
+                if not appid:
+                    continue
+
+                score_raw = payload.get('score') or payload.get(
+                    'bestScore') or payload.get('lastScore')
+                try:
+                    score_val = float(score_raw)
+                except (TypeError, ValueError):
+                    continue
+
+                tsms = getattr(log, 'tsms', 0)
+
+                clientid = payload.get('clientid')
+                try:
+                    if clientid:
+                        clientid = unquote(clientid)
+                except Exception:
+                    pass
+
+                # Match only records where clientid matches this course
+                if not clientid or clientid != expected_clientid:
+                    matched = False
                     try:
-                        score_val = float(score_raw)
-                    except (TypeError, ValueError):
-                        continue
-
-                    tsms = getattr(log, 'tsms', 0)
-
-                    clientid = payload.get('clientid')
-                    try:
-                        if clientid:
-                            clientid = unquote(clientid)
+                        for v in payload.values():
+                            if isinstance(v, str):
+                                if expected_clientid in v or encoded_course in v:
+                                    matched = True
+                                    break
                     except Exception:
-                        pass
-
-                    # Match only records where clientid equals expected_clientid
-                    if not clientid or clientid != expected_clientid:
-                        # also accept encoded form inside payload values (fallback)
                         matched = False
-                        try:
-                            for v in payload.values():
-                                if isinstance(v, str):
-                                    if expected_clientid in v or encoded_course in v:
-                                        matched = True
-                                        break
-                        except Exception:
-                            matched = False
-                        if not matched:
-                            continue
+                    if not matched:
+                        continue
 
-                    key_xp = (appid, clientid or '')
-                    existing = per_user_xp.get(key_xp)
-                    if (
-                        existing is None
-                        or score_val > existing['best_score']
-                        or (score_val == existing['best_score'] and tsms > existing['tsms'])
-                    ):
-                        per_user_xp[key_xp] = {
-                            'best_score': score_val, 'payload': payload, 'tsms': tsms}
-
-                # Merge per_user_xp into global xp_highscores with user id prefixed
-                for (appid, clientid_val), entry in per_user_xp.items():
-                    key = (user_str, appid, clientid_val)
-                    xp_highscores[key] = entry
+                user_str = str(log.user)
+                key = (user_str, appid, clientid or '')
+                existing = xp_highscores.get(key)
+                if (
+                    existing is None
+                    or score_val > existing['best_score']
+                    or (score_val == existing['best_score'] and tsms > existing['tsms'])
+                ):
+                    xp_highscores[key] = {
+                        'best_score': score_val, 'payload': payload, 'tsms': tsms}
         except Exception:
             xp_highscores = {}
 
@@ -1309,8 +1272,10 @@ class TopXpView(RetrieveAPIView):
             })
 
         # Sort by xp desc, tie-break by date_joined (earlier = better)
+        # Build lookup dict to avoid N+1 queries in sort
+        user_date_joined = {u.id: u.date_joined for u in users}
         xp_data.sort(
-            key=lambda x: (-x['xp'], User.objects.get(id=x['user_id']).date_joined))
+            key=lambda x: (-x['xp'], user_date_joined.get(x['user_id'], timezone.now())))
 
         # Assign ranks
         all_students_with_rank = []
@@ -1466,8 +1431,10 @@ class TopCoinsView(RetrieveAPIView):
                 'is_current_user': user.id == request.user.id,
             })
 
+        # Build lookup dict to avoid N+1 queries in sort
+        user_date_joined = {u.id: u.date_joined for u in users}
         coins_data.sort(
-            key=lambda x: (-x['coins'], User.objects.get(id=x['user_id']).date_joined))
+            key=lambda x: (-x['coins'], user_date_joined.get(x['user_id'], timezone.now())))
 
         all_with_rank = []
         current_user_entry = None
