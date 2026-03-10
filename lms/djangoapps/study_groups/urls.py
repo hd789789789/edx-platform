@@ -11,6 +11,9 @@ from .views import (
     StudyGroupMemberListView,
     StudyGroupMemberDetailView,
     AvailableGroupMembersListView,
+    StudyGroupInvitationListView,
+    MyInvitationsListView,
+    InvitationResponseView,
     StudyGroupCommentListView,
     StudyGroupCommentDetailView,
     CommentReactionView,
@@ -48,6 +51,23 @@ urlpatterns = [
         'study-groups/<int:id>/available-members/',
         AvailableGroupMembersListView.as_view(),
         name='study-groups-available-members'
+    ),
+
+    # Invitations endpoints
+    path(
+        'study-groups/<int:id>/invitations/',
+        StudyGroupInvitationListView.as_view(),
+        name='study-groups-invitations-list'
+    ),
+    path(
+        'invitations/my/',
+        MyInvitationsListView.as_view(),
+        name='study-groups-my-invitations'
+    ),
+    path(
+        'invitations/<int:id>/respond/',
+        InvitationResponseView.as_view(),
+        name='study-groups-invitation-respond'
     ),
 
     # Comments endpoints

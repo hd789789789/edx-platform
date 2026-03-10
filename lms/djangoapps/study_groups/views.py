@@ -39,6 +39,7 @@ from .models import (
     StudyGroupComment,
     CommentAttachment,
     CommentReaction,
+    StudyGroupInvitation,
     StudyGroupStreak,
 )
 from .permissions import (
@@ -65,6 +66,8 @@ from .serializers import (
     CommentAttachmentSerializer,
     ReactionCreateSerializer,
     CommentReactionSerializer,
+    StudyGroupInvitationSerializer,
+    StudyGroupInvitationCreateSerializer,
     StudyGroupStreakSerializer,
 )
 
@@ -492,10 +495,163 @@ class AvailableGroupMembersListView(ListAPIView):
         return users.order_by('username')
 
 
+class InvitationPagination(DefaultPagination):
+    """Pagination for invitations list."""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 50
+
+
+class StudyGroupInvitationListView(ListCreateAPIView):
+    """
+    List invitations for a study group or create a new invitation.
+
+    GET /api/study-groups/study-groups/{id}/invitations/
+    POST /api/study-groups/study-groups/{id}/invitations/
+    """
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+    pagination_class = InvitationPagination
+
+    def get_group(self):
+        group_id = self.kwargs.get('id')
+        try:
+            return StudyGroup.objects.get(id=group_id)
+        except StudyGroup.DoesNotExist:
+            raise Http404(_("Study group not found"))
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return StudyGroupInvitationCreateSerializer
+        return StudyGroupInvitationSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.request.method == 'POST':
+            context['group'] = self.get_group()
+        return context
+
+    def get_queryset(self):
+        group = self.get_group()
+        if not can_user_manage_members(self.request.user, group):
+            raise PermissionDenied(_("You don't have permission to view invitations for this group."))
+        status_filter = self.request.query_params.get('status', 'pending')
+        return StudyGroupInvitation.objects.filter(
+            group=group,
+            status=status_filter,
+        ).select_related('invited_by', 'invitee', 'group')
+
+    def perform_create(self, serializer):
+        group = self.get_group()
+        if not can_user_manage_members(self.request.user, group):
+            raise PermissionDenied(_("You don't have permission to invite members."))
+        invitation = serializer.save()
+        log.info('Study group invitation created', extra={
+            'invitation_id': invitation.id,
+            'group_id': group.id,
+            'invited_by': self.request.user.id,
+            'invitee': invitation.invitee.id,
+        })
+
+
+class MyInvitationsListView(ListAPIView):
+    """
+    List pending invitations for the current user.
+
+    GET /api/study-groups/invitations/my/?course_id=...
+    """
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = StudyGroupInvitationSerializer
+    pagination_class = InvitationPagination
+
+    def get_queryset(self):
+        queryset = StudyGroupInvitation.objects.filter(
+            invitee=self.request.user,
+            status='pending',
+        ).select_related('invited_by', 'invitee', 'group')
+
+        course_id = self.request.query_params.get('course_id')
+        if course_id:
+            try:
+                course_key = CourseKey.from_string(course_id)
+                queryset = queryset.filter(group__course_id=course_key)
+            except InvalidKeyError:
+                pass
+
+        return queryset.order_by('-created_at')
+
+
+class InvitationResponseView(APIView):
+    """
+    Accept or decline a study group invitation.
+
+    POST /api/study-groups/invitations/{id}/respond/
+    Body: {"action": "accept"} or {"action": "decline"}
+    """
+    authentication_classes = (
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def post(self, request, id):
+        try:
+            invitation = StudyGroupInvitation.objects.select_related('group', 'invitee').get(id=id)
+        except StudyGroupInvitation.DoesNotExist:
+            raise Http404(_("Invitation not found"))
+
+        if invitation.invitee != request.user:
+            raise PermissionDenied(_("You can only respond to your own invitations."))
+
+        if invitation.status != 'pending':
+            return Response(
+                {'error': _("This invitation has already been responded to.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        action = request.data.get('action')
+        if action not in ('accept', 'decline'):
+            return Response(
+                {'error': _("Action must be 'accept' or 'decline'.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if action == 'accept':
+            try:
+                invitation.accept()
+            except ValidationError as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            log.info('Study group invitation accepted', extra={
+                'invitation_id': invitation.id,
+                'group_id': invitation.group.id,
+                'user_id': request.user.id,
+            })
+        else:
+            invitation.decline()
+            log.info('Study group invitation declined', extra={
+                'invitation_id': invitation.id,
+                'group_id': invitation.group.id,
+                'user_id': request.user.id,
+            })
+
+        serializer = StudyGroupInvitationSerializer(invitation)
+        return Response(serializer.data)
+
+
 class StudyGroupCommentListView(ListCreateAPIView):
     """
     List comments in a study group or create a new comment.
-    
+
     GET /api/study-groups/{id}/comments/
     POST /api/study-groups/{id}/comments/
     """

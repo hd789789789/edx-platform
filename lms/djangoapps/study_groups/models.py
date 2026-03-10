@@ -300,6 +300,85 @@ class CommentReaction(models.Model):
         return f"{self.user.username} {self.reaction_type} on comment {self.comment.id}"
 
 
+class StudyGroupInvitation(models.Model):
+    """
+    Model representing an invitation to join a study group.
+    Members are invited (not added directly) and must accept before joining.
+
+    .. no_pii:
+    """
+
+    STATUS_CHOICES = [
+        ('pending', _('Pending')),
+        ('accepted', _('Accepted')),
+        ('declined', _('Declined')),
+    ]
+
+    class Meta:
+        app_label = 'study_groups'
+        db_table = 'study_groups_studygroupinvitation'
+        unique_together = (('group', 'invitee'),)
+        indexes = [
+            models.Index(fields=['group', 'status'], name='sg_invitation_group_status_idx'),
+            models.Index(fields=['invitee', 'status'], name='sg_invitation_invitee_idx'),
+        ]
+        ordering = ['-created_at']
+
+    id = models.BigAutoField(primary_key=True)
+    group = models.ForeignKey(
+        StudyGroup,
+        on_delete=models.CASCADE,
+        related_name='invitations'
+    )
+    invited_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='sent_sg_invitations'
+    )
+    invitee = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='received_sg_invitations'
+    )
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        inviter = self.invited_by.username if self.invited_by else 'Unknown'
+        return f"Invitation from {inviter} to {self.invitee.username} for {self.group.name} ({self.status})"
+
+    def clean(self):
+        """Validate that invitee is enrolled in the course and not already a member."""
+        if not CourseEnrollment.is_enrolled(self.invitee, self.group.course_id):
+            raise ValidationError(
+                _('User must be enrolled in the course to be invited to a study group.')
+            )
+        if self.group.is_member(self.invitee):
+            raise ValidationError(
+                _('User is already a member of this group.')
+            )
+
+    def accept(self):
+        """Accept the invitation and create a group membership."""
+        self.status = 'accepted'
+        self.responded_at = utc_now()
+        self.save()
+        # Create membership
+        StudyGroupMember.objects.create(
+            group=self.group,
+            user=self.invitee,
+            role='member',
+        )
+
+    def decline(self):
+        """Decline the invitation."""
+        self.status = 'declined'
+        self.responded_at = utc_now()
+        self.save()
+
+
 class StudyGroupStreak(models.Model):
     """
     Model representing the streak of a study group.

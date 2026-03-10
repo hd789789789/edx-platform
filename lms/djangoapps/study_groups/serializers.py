@@ -15,6 +15,7 @@ from .models import (
     StudyGroupComment,
     CommentAttachment,
     CommentReaction,
+    StudyGroupInvitation,
     StudyGroupStreak,
 )
 
@@ -379,6 +380,74 @@ class ReactionCreateSerializer(serializers.ModelSerializer):
             comment=comment,
             user=request.user,
             reaction_type=reaction_type
+        )
+
+
+class StudyGroupInvitationSerializer(serializers.ModelSerializer):
+    """Serializer for reading study group invitations."""
+
+    invited_by = UserSerializer(read_only=True)
+    invitee = UserSerializer(read_only=True)
+    group_name = serializers.CharField(source='group.name', read_only=True)
+    group_id = serializers.IntegerField(source='group.id', read_only=True)
+    course_id = serializers.CharField(source='group.course_id', read_only=True)
+
+    class Meta:
+        model = StudyGroupInvitation
+        fields = (
+            'id', 'group_id', 'group_name', 'course_id',
+            'invited_by', 'invitee', 'status',
+            'created_at', 'responded_at',
+        )
+        read_only_fields = fields
+
+
+class StudyGroupInvitationCreateSerializer(serializers.Serializer):
+    """Serializer for creating a study group invitation."""
+
+    user = serializers.CharField(help_text="Username or email of the user to invite")
+
+    def validate_user(self, value):
+        """Find user by username or email."""
+        from django.db.models import Q
+
+        try:
+            user = User.objects.get(Q(username=value) | Q(email=value))
+            return user
+        except User.DoesNotExist:
+            raise serializers.ValidationError(_("User not found with username or email: {}").format(value))
+        except User.MultipleObjectsReturned:
+            raise serializers.ValidationError(_("Multiple users found with username or email: {}").format(value))
+
+    def validate(self, attrs):
+        """Validate invitation constraints."""
+        from common.djangoapps.student.models import CourseEnrollment
+
+        invitee = attrs['user']
+        group = self.context['group']
+
+        if not CourseEnrollment.is_enrolled(invitee, group.course_id):
+            raise serializers.ValidationError(
+                {'user': _('User must be enrolled in the course.')}
+            )
+        if group.is_member(invitee):
+            raise serializers.ValidationError(
+                {'user': _('User is already a member of this group.')}
+            )
+        if StudyGroupInvitation.objects.filter(group=group, invitee=invitee, status='pending').exists():
+            raise serializers.ValidationError(
+                {'user': _('An invitation is already pending for this user.')}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        """Create the invitation."""
+        group = self.context['group']
+        request = self.context['request']
+        return StudyGroupInvitation.objects.create(
+            group=group,
+            invited_by=request.user,
+            invitee=validated_data['user'],
         )
 
 
