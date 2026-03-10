@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ('study_groups', '0003_alter_commentattachment_file_path_and_more'),
+        ('study_groups', '0002_studygroupstreak'),
     ]
 
     operations = [
