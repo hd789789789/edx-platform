@@ -544,17 +544,21 @@ class StudyGroupInvitationListView(ListCreateAPIView):
             status=status_filter,
         ).select_related('invited_by', 'invitee', 'group')
 
-    def perform_create(self, serializer):
+    def create(self, request, *args, **kwargs):
         group = self.get_group()
-        if not can_user_manage_members(self.request.user, group):
+        if not can_user_manage_members(request.user, group):
             raise PermissionDenied(_("You don't have permission to invite members."))
-        invitation = serializer.save()
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        invitation = write_serializer.save()
         log.info('Study group invitation created', extra={
             'invitation_id': invitation.id,
             'group_id': group.id,
-            'invited_by': self.request.user.id,
+            'invited_by': request.user.id,
             'invitee': invitation.invitee.id,
         })
+        read_serializer = StudyGroupInvitationSerializer(invitation)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class MyInvitationsListView(ListAPIView):
