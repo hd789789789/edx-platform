@@ -415,9 +415,9 @@ class StudyGroupInvitationCreateSerializer(serializers.Serializer):
             user = User.objects.get(Q(username=value) | Q(email=value))
             return user
         except User.DoesNotExist:
-            raise serializers.ValidationError(_("User not found with username or email: {}").format(value))
+            raise serializers.ValidationError(_("Không tìm thấy người dùng: {}").format(value))
         except User.MultipleObjectsReturned:
-            raise serializers.ValidationError(_("Multiple users found with username or email: {}").format(value))
+            raise serializers.ValidationError(_("Tìm thấy nhiều người dùng với thông tin: {}").format(value))
 
     def validate(self, attrs):
         """Validate invitation constraints."""
@@ -428,26 +428,35 @@ class StudyGroupInvitationCreateSerializer(serializers.Serializer):
 
         if not CourseEnrollment.is_enrolled(invitee, group.course_id):
             raise serializers.ValidationError(
-                {'user': _('User must be enrolled in the course.')}
+                {'user': _('Người dùng phải đăng ký khóa học này.')}
             )
         if group.is_member(invitee):
             raise serializers.ValidationError(
-                {'user': _('User is already a member of this group.')}
+                {'user': _('Người dùng đã là thành viên của nhóm.')}
             )
         if StudyGroupInvitation.objects.filter(group=group, invitee=invitee, status='pending').exists():
             raise serializers.ValidationError(
-                {'user': _('An invitation is already pending for this user.')}
+                {'user': _('Đã gửi lời mời cho người dùng này rồi.')}
             )
         return attrs
 
     def create(self, validated_data):
-        """Create the invitation."""
+        """Create the invitation. Delete old non-pending invitation if exists (re-invite after removal)."""
         group = self.context['group']
         request = self.context['request']
+        invitee = validated_data['user']
+
+        # Remove old accepted/declined invitation to allow re-invite
+        StudyGroupInvitation.objects.filter(
+            group=group,
+            invitee=invitee,
+            status__in=['accepted', 'declined'],
+        ).delete()
+
         return StudyGroupInvitation.objects.create(
             group=group,
             invited_by=request.user,
-            invitee=validated_data['user'],
+            invitee=invitee,
         )
 
 
